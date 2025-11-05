@@ -1,0 +1,14 @@
+flowchart LR
+  Integrations[Integrations] --> IPaaS[iPaaS]
+  Integrations --> Serverless[Serverless]
+  Integrations --> Kubernetes[Kubernetes]
+  Integrations --> Warehouse[Warehouse Native]
+  Integrations --> Streaming[Managed Streaming]
+  Integrations --> OnPrem[On Prem and Edge]
+
+  IPaaS --> Fit1[Simple SaaS to SaaS]
+  Serverless --> Fit2[Events and Micro Batches]
+  Kubernetes --> Fit3[High Throughput Custom]
+  Warehouse --> Fit4[Analytics ELT]
+  Streaming --> Fit5[Near Real Time Fanout]
+  OnPrem --> Fit6[Local and Regulated]

@@ -1,0 +1,10 @@
+flowchart LR
+  subgraph Cluster[HyperV Cluster WSFC]
+    Host1[Host1 HyperV]
+    Host2[Host2 HyperV]
+  end
+  Host1 --> VMCP[K8s Control Plane]
+  Host2 --> VMWin[Windows Workers]
+  Storage[SMB NFS iSCSI ReFS] --- Cluster
+  Gateway[ADF IR Gateways Runners] --> Network[DMZ VLAN]
+  Cluster --> Apps[Integration Services]

@@ -1642,6 +1642,8 @@ Mermaid: DLQ and replay
 
 ## Common deployment environments for integrations
 
+![Deployment environments overview](images/deploy-environments.png)
+
 Choose an environment based on connectivity, compliance, scale, skills, and total cost of ownership (TCO). Most teams mix two or more for different flows.
 
 1) iPaaS / Integration Platforms (MuleSoft, Boomi, Workato, Azure Logic Apps, AWS AppFlow)
@@ -1684,6 +1686,8 @@ Choose an environment based on connectivity, compliance, scale, skills, and tota
 - Pros: Local data residency, deterministic network, OT segmentation; compliance alignment (CIP/IEC 62443).
 - Cons: Hardware/ops cost, slower change management, connector gaps.
 - Fit: Plants/substations, on‑prem ERPs/MDMS/LIMS, Windows estates leveraging Hyper‑V, partners restricted to SFTP.
+
+![HyperV on prem deployment](images/hyperv-onprem.png)
 
 Quick selection
 - Mostly SaaS-to-SaaS → iPaaS or serverless.
