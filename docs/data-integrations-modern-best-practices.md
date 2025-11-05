@@ -1677,9 +1677,13 @@ Choose an environment based on connectivity, compliance, scale, skills, and tota
 
 6) On‑prem / Hybrid / Edge (utilities & regulated)
 - Patterns: Self-hosted runtimes, private connectivity (VPN/MPLS), data diodes/DMZ, bastions; Azure IR for on-prem sources.
+- Hyper‑V (Windows Server virtualization): Windows/Linux VMs on Hyper‑V hosts with Windows Server Failover Clustering (WSFC) + Live Migration; SCVMM for fleet mgmt; vSwitch/VLANs/NIC teaming/SR‑IOV for network isolation and throughput.
+  - Kubernetes on Hyper‑V: k8s clusters using Hyper‑V VMs (kubeadm, Rancher, MicroK8s/K3s) incl. Windows worker nodes; consider Azure Arc or AKS on Azure Stack HCI.
+  - CI agents and runtimes: self‑hosted GitHub/Azure DevOps runners, ADF Self‑Hosted Integration Runtime, Power Platform/Power BI on‑prem gateway.
+  - Storage: SMB/NFS shares, iSCSI, ReFS; ensure multipath I/O and backups; encrypt at rest (BitLocker) for regulated data.
 - Pros: Local data residency, deterministic network, OT segmentation; compliance alignment (CIP/IEC 62443).
 - Cons: Hardware/ops cost, slower change management, connector gaps.
-- Fit: Plants/substations, on-prem ERPs/MDMS/LIMS, partners restricted to SFTP.
+- Fit: Plants/substations, on‑prem ERPs/MDMS/LIMS, Windows estates leveraging Hyper‑V, partners restricted to SFTP.
 
 Quick selection
 - Mostly SaaS-to-SaaS → iPaaS or serverless.
