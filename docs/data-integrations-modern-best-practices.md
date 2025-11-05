@@ -75,7 +75,10 @@ Good when the destination must receive clean, modeled data.
 - **Pros**: faster queries on arrival, smaller storage.
 - **Cons**: less raw history, harder to re-model later.
 
-**Learn more**: [dbt docs](https://docs.getdbt.com/), [Snowflake best practices](https://docs.snowflake.com/en/user-guide/data-load-best-practices), [BigQuery best practices](https://cloud.google.com/bigquery/docs/best-practices-loading-data).
+**Learn more (summaries)**
+- dbt docs: dbt is SQL-first transformation with versioned models, tests, and environments; the docs cover modeling patterns (staging/marts), tests, and CI/CD for analytics ELT.
+- Snowflake data load best practices: guidance on file formats, micro-batching, COPY options, and performance/warehouse sizing for efficient ingests.
+- BigQuery loading best practices: recommendations on ingest formats (Parquet/Avro), partitioning/clustering, streaming inserts vs batch loads, and cost controls.
 
 #### ELT (load then transform)
 
@@ -115,7 +118,9 @@ Reads database **change logs** (append-only records of row changes).
 - **Pros**: near-real-time sync, avoids full scans.
 - **Cons**: requires log access and careful **schema evolution** (changing schemas without breaking consumers).
 
-**Learn more**: [Debezium](https://debezium.io/), [Kafka Connect](https://docs.confluent.io/platform/current/connect/index.html).
+**Learn more (summaries)**
+- Debezium: open-source CDC connectors for MySQL/Postgres/SQL Server/Oracle; explains outbox patterns, schema evolution, and exactly-once considerations.
+- Kafka Connect: distributed connector runtime with sink/source connectors, offset management, and REST management API; covers scalability and fault tolerance.
 
 ---
 
@@ -494,6 +499,163 @@ Red flags and mitigations
 - No unique identifiers → derive deterministic keys and keep a manifest for dedupe.
 - Large late-arriving files → design for replay/backfill; partition by date and recompute safely.
 - Partner outages → dead-letter queues, retry schedules, and clear runbooks with contacts.
+
+## Industry-specific integrations: Public Utilities
+
+Public utilities blend OT (operational technology: control systems) and IT (information technology: business systems). Integrations must respect safety, reliability, and regulatory constraints while delivering timely, trustworthy data.
+
+### Electric generation and transmission (plants, ISO/RTO)
+- Systems: SCADA/EMS (control/energy management), plant historians (OSIsoft/AVEVA PI), PMU synchrophasors, market/settlement systems (ISO/RTO), LMP pricing feeds.
+- Protocols/standards: OPC UA, IEC 61850 (substation comms), DNP3 (telemetry/control), IEEE C37.118 (synchrophasors), MODBUS, MQTT Sparkplug B.
+- Patterns: edge gateway normalizes tags → event backbone (Kafka/Redpanda) → stream processing (windowing, quality flags) → time-series store (ClickHouse/Timescale/Influx) and data lake.
+- Data contracts: tag catalog (name, unit, scaling, limits), quality (good/bad/uncertain), sampling interval, timezone, asset hierarchy (CIM/IEC 61970 where applicable).
+- Security/regulation: NERC CIP (critical infrastructure protection), network segmentation (OT/DMZ/IT), one-way data diodes where required, mTLS/IP allowlists, strict change control.
+- SLAs: telemetry latency (e.g., p95 < 5s plant→control room), loss tolerance (no silent drops), replay/backfill from historian.
+
+Python example: read an OPC UA tag and publish to Kafka (conceptual)
+```python
+from asyncua import Client  # OPC UA client
+from confluent_kafka import Producer
+import json, asyncio, os
+
+OPC_ENDPOINT = os.getenv("OPC_ENDPOINT", "opc.tcp://plc1:4840")
+KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
+TAG_NODE = os.getenv("TAG_NODE", "ns=2;i=10853")  # example node id
+
+def publish(p: Producer, topic: str, msg: dict):
+    p.produce(topic, json.dumps(msg).encode("utf-8"))
+    p.poll(0)
+
+async def main():
+    p = Producer({"bootstrap.servers": KAFKA_BROKERS})
+    async with Client(url=OPC_ENDPOINT) as client:
+        node = client.get_node(TAG_NODE)
+        while True:
+            val = await node.read_value()
+            publish(p, "telemetry.plant1", {"node": TAG_NODE, "value": val})
+            await asyncio.sleep(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Electric distribution (AMI, ADMS/DMS, OMS, GIS, MDMS, CIS)
+- Systems: AMI head-end (smart meters), MDMS (meter data mgmt), ADMS/DMS (distribution mgmt), OMS (outage), GIS (Esri), WAMS, CIS/billing (SAP IS-U, Oracle CC&B), WAM/CMMS (Maximo).
+- Transports: vendor APIs/webhooks, SFTP daily reads/outage files, CDC from CIS/ERP, message buses.
+- Patterns: AMI intervals (15m/60m) → Kafka topic per service territory → streaming aggregations (billing cycles, TOU, demand) → MDMS/warehouse → CIS billing; outage events → OMS → notifications and crew dispatch.
+- Contracts: meter identifier (ESN/MeterID/ServicePoint), interval schema (start, end, kWh/kW, quality), timezone and DST handling, estimator/substituter flags.
+- Security: partner IP allowlists, PGP for files, privacy (household consumption), retention per regulation.
+
+### Broadband (fiber/HFC, OSS/BSS)
+- Systems: OSS (network inventory, provisioning), BSS (orders/billing), ACS (TR-069/TR-369 USP), RADIUS/AAA, DHCP/DNS, SDN controllers, NetOps (NMS), ticketing.
+- Standards: TM Forum Open APIs (TMF 6xx series) for orders/inventory, TR-069/TR-369 for CPE mgmt, SNMP/gNMI/OpenConfig for telemetry, IPDR/NetFlow.
+- Patterns: Order → Provision (inventory assign, device config) → Activate (RADIUS/AAA) → Monitor (telemetry to Kafka/TSDB) → Bill (usage CDRs) → Support (tickets).
+- Mediation: normalize multi-vendor telemetry to a common schema; enrich with inventory and customer context.
+
+### Water and wastewater
+- Systems: SCADA (plants/pump stations), LIMS (lab results), CMMS (asset/work mgmt), GIS, CIS/billing, compliance reporting (e.g., EPA NetDMR).
+- Protocols: OPC UA/MODBUS/DNP3 at the edge; SFTP/API for lab and compliance systems.
+- Patterns: alarms/events to streaming with dedupe and escalation; daily lab results batch to warehouse and regulatory exports.
+- Security: IEC 62443 (industrial security), segmentation, principle of least functionality on PLCs, strict patch/change windows.
+
+Key cross-cutting controls for utilities
+- Edge buffers and local store-and-forward to tolerate network gaps.
+- Deterministic time handling (UTC internally; clear timezone on inputs; monotonic clocks for ordering).
+- Backfill from historians/MDMS with idempotent merges.
+- Dual-run validations when changing estimators/substituters or tariff models.
+
+#### Utilities diagrams
+
+![Utilities OT-to-IT telemetry flow](images/utilities-ot-it-flow.png)
+
+![AMI to billing aggregation](images/utilities-ami-billing.png)
+
+---
+
+## Microsoft enterprise estate integrations
+
+Leverage Azure-native services and Microsoft SaaS with first-class identity, private networking, and governed data flows.
+
+Identity and access
+- Microsoft Entra ID (Azure AD): App registrations, OAuth2 client credentials, RBAC; Managed Identities for compute (no static secrets).
+- Microsoft Graph API: unified access to M365 (Users/Groups/Files/Teams); granular consent and least-privilege scopes.
+
+Messaging and events
+- Event Hubs (big telemetry streams, Kafka-compatible), Service Bus (ordered queues/topics, transactions), Event Grid (reactive, push-style routing), IoT Hub (device telemetry + DPS).
+- Pattern: external webhooks → API Management → Functions/Logic Apps → Service Bus; high-throughput telemetry → Event Hubs → Stream processing → Lakehouse.
+
+Data & ELT
+- Storage: ADLS Gen2; Lakehouse: Synapse/Fabric; Compute: Databricks/Spark or Fabric notebooks; Orchestration: Azure Data Factory or Fabric Data Factory.
+- CDC: SQL Server Change Tracking/Capture → ADF → Delta Lake; on-prem via Self-hosted Integration Runtime (IR).
+- Governance: Microsoft Purview (catalog/classification/lineage); data products with domains.
+
+Applications
+- Dynamics 365 & Dataverse: use Web API and Change Tracking; Power Platform connectors for low-code integrations.
+- SharePoint/OneDrive: Microsoft Graph and change notifications; large file upload sessions.
+- Azure API Management: externalize partner APIs; policies for rate limits/JWT validation; Private Link for internal.
+
+Networking & security
+- Private Endpoints/Private Link and VNet integration for Functions, ADF, Storage, Synapse; disable public network access.
+- Secrets in Key Vault; Defender for Cloud and Sentinel (SIEM) for detection; Azure Policy for guardrails; PIM for just-in-time privileged access.
+
+TypeScript example: Service Bus queue consumer
+```ts
+import { ServiceBusClient } from "@azure/service-bus";
+
+const connectionString = process.env.SB_CONNECTION_STRING!; // store in Key Vault
+const queueName = process.env.SB_QUEUE_NAME!;
+
+const sb = new ServiceBusClient(connectionString);
+const receiver = sb.createReceiver(queueName);
+
+receiver.subscribe({
+  async processMessage(msg) {
+    // Idempotency: use msg.messageId as key
+    console.log("Message:", msg.body);
+  },
+  async processError(err) {
+    console.error("SB error", err);
+  }
+});
+```
+
+Python example: Event Hubs ingestion
+```python
+from azure.eventhub import EventHubConsumerClient
+import os
+
+conn_str = os.environ["EH_CONN_STR"]  # Key Vault-backed
+consumer_group = "$Default"
+fully_qualified_namespace = os.environ["EH_FQNS"]  # e.g., myns.servicebus.windows.net
+hub_name = os.environ["EH_NAME"]
+
+client = EventHubConsumerClient.from_connection_string(
+    conn_str=conn_str, consumer_group=consumer_group, eventhub_name=hub_name
+)
+
+def on_event(partition_context, event):
+    print("Event:", event.body_as_str())
+    partition_context.update_checkpoint(event)
+
+with client:
+    client.receive(on_event=on_event, starting_position="-1")
+```
+
+Scala note: Event Hubs has a Kafka endpoint; use standard Kafka clients with SASL/SSL to consume/produce (topic = Event Hub name). Treat connection secrets as managed credentials.
+
+Operational guardrails (Azure)
+- Use Managed Identities wherever possible (Functions/Databricks/Synapse) and Key Vault references for secrets.
+- Lock down Storage/Databricks/Synapse with Private Endpoints; route through Azure Firewall.
+- Purview scans for classification/lineage; enforce schema compatibility in CI for Delta tables.
+- Tag resources (owner, data-domain, sensitivity); automate cost and drift alerts.
+
+#### Microsoft/Azure diagrams
+
+![Azure APIM to Service Bus and Event Hubs flow](images/azure-apim-sb-flow.png)
+
+![Azure ADF/Delta/Purview integration](images/azure-adf-delta.png)
+
+---
 
 ## Reference blueprint (conceptual)
 
@@ -973,7 +1135,13 @@ logError(new Error("Invalid schema"), { file_name: "bad.csv", row: 42 });
 - **Logs**: structured JSON logs for easy search.
 - **Traces**: end-to-end timing and context across services using [OpenTelemetry](https://opentelemetry.io/).
 
-**Learn more**: [OpenTelemetry docs](https://opentelemetry.io/docs/), [Prometheus](https://prometheus.io/), [Grafana](https://grafana.com/), [Google Cloud Logging redaction](https://cloud.google.com/logging/docs/redaction), [Stripe Idempotency Keys](https://stripe.com/docs/idempotency), [RFC 8297 pagination guidance](https://www.rfc-editor.org/rfc/rfc8297).
+**Learn more (summaries)**
+- OpenTelemetry docs: vendor-neutral APIs/SDKs for traces, metrics, logs; how to instrument services and export to backends.
+- Prometheus: pull-based metrics with PromQL; docs cover counters/gauges/histograms, recording rules, and alerting.
+- Grafana: dashboards/alerts over Prometheus, Loki, Tempo; guides on building effective SLO and troubleshooting panels.
+- Google Cloud Logging redaction: field-level redaction and sinks to prevent sensitive data exposure; patterns transferable to other log stacks.
+- Stripe Idempotency Keys: request-key semantics, replay behavior, and storage strategy—good blueprint for your APIs.
+- RFC 8288 pagination (Link headers) and related guidance: standard HTTP pagination links (next, prev) and best practices for robust clients.
 
 ---
 
@@ -1204,7 +1372,10 @@ object WebhookVerifier {
 - **Tokenization**: replace sensitive fields with tokens; store mapping in a secure vault; detokenize only where needed.
 - **Immutable audit trail**: write-once logs to object storage with legal holds; hash chain for tamper-evidence.
 
-**Learn more**: [OWASP API Security Top 10](https://owasp.org/www-project-api-security/), [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework), [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/).
+**Learn more (summaries)**
+- OWASP API Security Top 10: common API risks (broken auth, excessive data exposure, injection) with mitigations and testing guidance.
+- NIST Cybersecurity Framework: Identify→Protect→Detect→Respond→Recover; maps technical controls to governance and risk management.
+- CIS Benchmarks: hardening guides and automated checks for OS, Kubernetes, clouds; baseline configurations for secure runtime.
 
 ![Security layers and secrets management](images/security.png)
 
@@ -1213,7 +1384,9 @@ object WebhookVerifier {
 - **Encryption**: at rest and in transit.
 - **PII handling**: mask or tokenize sensitive fields where possible.
 
-**Learn more**: [OWASP top 10](https://owasp.org/www-project-top-ten/), [GDPR compliance](https://gdpr.eu/).
+**Learn more (summaries)**
+- OWASP Top 10: web application risk catalog (injection, auth, sensitive data exposure) complementing the API Top 10.
+- GDPR compliance: core principles (lawful basis, data minimization, purpose limitation), DSRs, records of processing, and international transfer rules.
 
 ---
 
@@ -1246,52 +1419,52 @@ object WebhookVerifier {
 
 ---
 
-## Curated learn-more links
+## Curated learn-more links (with summaries)
 
 ### Data contracts and schemas
 
-- [JSON Schema](https://json-schema.org/)
-- [OpenAPI](https://www.openapis.org/)
-- [Protocol Buffers](https://protobuf.dev/)
+- JSON Schema: human/machine-readable JSON validation; drafts specify types, enums, formats, and $ref composition.
+- OpenAPI: REST API contract including paths, schemas, auth; enables codegen and contract testing.
+- Protocol Buffers: compact binary schemas with codegen; great for gRPC and long-lived event payloads.
 
 ### Orchestration
 
-- [Dagster docs](https://dagster.io/)
-- [Prefect docs](https://www.prefect.io/)
-- [Temporal docs](https://temporal.io/)
+- Dagster docs: software-defined assets, type-checked pipelines, powerful IO managers and observability out of the box.
+- Prefect docs: Python-first orchestration with flows/tasks, retry policies, and hosted Orion UI.
+- Temporal docs: durable, code-first workflows with state replay, activity retries, and strong guarantees.
 
 ### Transformations
 
-- [dbt Core docs](https://docs.getdbt.com/)
-- [Spark docs](https://spark.apache.org/docs/latest/)
+- dbt Core docs: model layering (staging/marts), tests, macros, and environment promotion for analytics ELT.
+- Spark docs: distributed compute (DataFrame, SQL, streaming), partition/pruning strategies, and performance tuning.
 
 ### Streaming
 
-- [Kafka docs](https://kafka.apache.org/documentation/)
-- [Redpanda docs](https://docs.redpanda.com/)
-- [Kafka Connect](https://docs.confluent.io/platform/current/connect/index.html)
-- [Debezium](https://debezium.io/)
+- Kafka docs: topics, partitions, consumer groups, exactly-once semantics (EOSv2), and Streams API.
+- Redpanda docs: Kafka-compatible broker with single-binary ops and tiered storage options.
+- Kafka Connect: connector framework, offset storage, single message transforms (SMTs), distributed mode.
+- Debezium: CDC connectors and outbox pattern; schema history and snapshot modes.
 
 ### Validation
 
-- [Zod](https://zod.dev/)
-- [Pydantic](https://docs.pydantic.dev/)
-- [Circe](https://circe.github.io/circe/)
+- Zod: TypeScript-first runtime validation with static type inference for safer IO boundaries.
+- Pydantic: Python model validation, coercion, and error reporting with JSON schema export.
+- Circe: Scala JSON codecs with automatic/semi-automatic derivation and composable decoders.
 
 ### Observability
 
-- [OpenTelemetry docs](https://opentelemetry.io/docs/)
+- OpenTelemetry docs: traces/metrics/logs, semantic conventions, and collectors/exporters for common backends.
 
 ### Data quality
 
-- [Great Expectations](https://greatexpectations.io/)
-- [Soda Core](https://www.soda.io/)
+- Great Expectations: declarative expectations, data docs, and validation stores for pipeline gates.
+- Soda Core: lightweight checks, SodaCL, and integration with warehouses and orchestrators.
 
 ### Lakehouse table formats
 
-- [Apache Iceberg](https://iceberg.apache.org/)
-- [Delta Lake](https://delta.io/)
-- [Apache Hudi](https://hudi.apache.org/)
+- Apache Iceberg: hidden partitioning, snapshots/time travel, and branch/tag support for tables.
+- Delta Lake: ACID on Parquet with optimistic concurrency, MERGE INTO, and vacuum/retention controls.
+- Apache Hudi: incremental pulls, upserts, and two table types (CoW/MoR) for different latency profiles.
 
 ---
 

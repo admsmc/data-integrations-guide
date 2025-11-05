@@ -1,0 +1,7 @@
+flowchart LR
+  AMI[AMI intervals] --> K[(Kafka)]
+K --> Agg[Windowed Aggregations TOU Demand]
+  Agg --> MDMS[MDMS]
+  MDMS --> CIS[CIS/Billing]
+  Agg --> WH[(Warehouse)]
+  CIS --> GL[GL/ERP]

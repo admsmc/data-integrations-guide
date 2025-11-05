@@ -1,0 +1,13 @@
+flowchart LR
+  ext[External Webhooks] --> APIM[API Management]
+  APIM --> FUNC[Azure Functions]
+  FUNC --> SB[(Service Bus)]
+  SB --> Apps[Consumers/Workers]
+
+  Telemetry[Device/Apps Telemetry] --> EH[(Event Hubs)]
+EH --> Stream[Stream Processing Databricks Spark Fabric]
+  Stream --> ADLS[(ADLS Gen2)]
+  ADLS --> Syn[Synapse/Fabric Lakehouse]
+
+  classDef azure fill:#e6f2ff,stroke:#1e90ff;
+  class APIM,FUNC,SB,EH,ADLS,Syn azure;

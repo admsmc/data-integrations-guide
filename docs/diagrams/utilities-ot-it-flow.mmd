@@ -1,0 +1,16 @@
+flowchart LR
+  subgraph OT[OT edge]
+    SCADA[SCADA/EMS]
+    AMI[AMI Head-End]
+    LIMS[LIMS]
+  end
+  SCADA --> GW[Edge Gateway/OPC UA]
+  AMI --> GW
+  LIMS --> GW
+  GW --> K[(Kafka/Redpanda)]
+K --> SP[Stream Processing Flink+Spark]
+SP --> TSDB[(Time-series DB)]
+SP --> DL[(Lakehouse Delta Iceberg)]
+SP --> OMS[OMS/ADMS/MDMS/CIS]
+  DL --> BI[Analytics/Reporting]
+  classDef ot fill:#ffe6cc,stroke:#cc7a00;

@@ -1,0 +1,9 @@
+flowchart LR
+  DV[Dataverse/Dynamics] -- Change Tracking --> ADF[Data Factory]
+  ADF --> DL[(Delta Lake on ADLS)]
+  DL --> DBX[Databricks/Spark]
+  DBX --> Curated[Curated Tables]
+  Curated --> Apps[Downstream Apps/BI]
+  KV[Key Vault] -.-> ADF
+  Purview[Purview] -. catalog/lineage .-> DL
+  PE[Private Endpoints] -. network .-> ADF
