@@ -135,6 +135,15 @@ Operational rules
 
 ![Bronze Silver Gold flow](images/medallion.png)
 
+#### Where SQL fits in data integrations
+- Set-based transforms in ELT: normalization, dedupe, conformance, SCDs, aggregates, marts (Bronze → Silver → Gold) using dbt/SQL engines.
+- Pushdown extraction: projection and filtering at source to reduce egress (only required columns/rows) for batch/incremental pulls.
+- CDC apply: MERGE/UPSERT operations to apply change streams into ACID tables with idempotent keys and deterministic ordering.
+- Reverse ETL selection: SQL SELECTs for downstream sync targets, with windowing and watermark conditions.
+- Quality and contracts: SQL constraints, expectation queries, and dbt tests (not null, unique, relationships) as gates.
+- Serving: views/materialized views for stable interfaces; performance-tuned with indexes/cluster keys/partitioning.
+- Not for orchestration/connectors: keep control flow, retries, partner auth, and side-effects in services/orchestrators; keep SQL focused on data transforms and validation.
+
 ---
 
 ### Batch vs streaming
@@ -209,6 +218,26 @@ Reads database **change logs** (append-only records of row changes).
 - Keys and updates: enforce stable primary keys; when keys change, emit tombstone + insert for compacted topics; downstream merges must handle updates vs deletes.
 - Transaction boundaries: leverage source transaction metadata to ensure write atomicity at sinks (e.g., MERGE with commit timestamp ordering).
 - Debezium specifics: outbox pattern, heartbeat topics, transaction metadata topics; tune snapshot.fetch.size, max.batch.size for stability.
+
+---
+
+### ODBC and direct database connections
+
+Use ODBC/JDBC or native drivers to read from source databases when APIs/CDC are unavailable. Treat this as a controlled, read-only integration with pushdown filtering and strict governance.
+
+Key practices
+- Connectivity and security: TLS-encrypted connections; IP allowlists/VPN; read-only users scoped to specific schemas; least-privilege views.
+- Performance: pushdown projection and predicates (SELECT only needed columns/rows); paginate with keyset pagination (WHERE id > last_id ORDER BY id) over LIMIT/OFFSET; tune fetch size.
+- Consistency: prefer snapshot isolation (REPEATABLE READ/SNAPSHOT) for multi-page extracts; include high-water marks (updated_at, id) and resume tokens.
+- Scheduling: incremental extracts by updated_at or change table when CDC is unavailable; backfill by ranges (date/id shards).
+- Resiliency: retries with exponential backoff; connection pooling; statement timeouts and circuit breakers.
+- Drivers: ODBC (cross-platform via DSN) vs JDBC (JVM-based); use vendor-supported drivers for SQL Server, Oracle, MySQL, Postgres, Snowflake, etc.
+- Data types: normalize timezones (store UTC), decimals/scale, large text/BLOBs; explicitly cast to stable types at extraction.
+- Governance: document queries, indices relied upon, and SLAs; monitor source impact (CPU, locks, long-running queries).
+
+When to use
+- Legacy/closed systems without APIs/CDC; reporting replicas allowed; low-to-moderate freshness requirements.
+- Avoid for hot operational paths or when CDC is available (prefer CDC to minimize load and improve consistency).
 
 ---
 
