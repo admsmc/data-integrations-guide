@@ -1529,6 +1529,93 @@ object WebhookVerifier {
 
 ---
 
+## Language choice for portable, system-agnostic integrations
+
+Goal: write once, run anywhere (iPaaS, serverless, containers, schedulers) with minimal vendor lock-in.
+
+Principles for portability
+- Keep a pure core: no provider SDKs in core logic; expose small, pure functions (transform, validate, upsert plans) and make I/O adapter-specific.
+- Stable, explicit contracts: JSON Schema/Avro/Protobuf for inputs/outputs; strict validation at boundaries.
+- Multiple façades: package the core as (a) CLI (stdin JSON → stdout JSON), (b) gRPC/HTTP microservice, and (c) library API. This covers most orchestrators/providers.
+- Reproducible builds: lock dependencies (Poetry/uv, npm/pnpm lock, Go modules), containerize with slim bases, pin OS packages.
+- Telemetry and policy: OpenTelemetry for traces/metrics/logs; configuration via env (12‑factor); feature flags for provider-specific behavior.
+
+Language options (pragmatic scorecard)
+- Python
+  - Pros: ubiquitous data ecosystem (Pandas/Arrow/dbt clients), first-class in Airflow/Dagster/Prefect, easy in Lambda/Cloud Run/Functions.
+  - Cons: cold starts, packaging conflicts, GIL; careful with CPU-heavy transforms (use vectorized ops).
+  - Portability tips: ship as slim container with uv/Poetry; freeze minor version; optional PyOxidizer or Nuitka for single-binary if needed.
+- Go
+  - Pros: static binaries, fast startup, low memory; excellent for CLI + microservices; easy cross-compile; good fit for Lambda/Cloud Run.
+  - Cons: smaller data/transforms ecosystem than Python; JSON ergonomics improved with generics but still verbose.
+  - Portability tips: build a single self-contained binary; embed OpenAPI client code; native gRPC.
+- TypeScript/Node
+  - Pros: great HTTP/webhook ergonomics, rich SaaS SDKs, JSON-first; supported in serverless/orchestrators.
+  - Cons: bundling/ESM vs CJS quirks; single-thread event loop; cold starts vs Go.
+  - Portability tips: bundle with esbuild; use Zod for schemas; keep core pure TS with separate provider adapters.
+- JVM (Java/Scala/Kotlin)
+  - Pros: top choice for heavy streaming (Flink/Spark), strong typing/perf, long-running connectors.
+  - Cons: heavier images and cold start; best for persistent workers, not tiny Lambdas.
+  - Portability tips: run as long-lived jobs; consider GraalVM native where applicable.
+- Rust / WASM (WASI)
+  - Pros: performance, safety; WASI promises sandboxed portability.
+  - Cons: ecosystem maturity for data tooling; WASI support across providers still emerging.
+  - Use when: you need high‑perf parsing/crypto libraries shared across language adapters.
+
+Recommended approach
+- Default: Python or Go for the core library if portability is the top priority.
+  - Python for rich data manipulation and broad orchestrator support.
+  - Go for fast startup, static binaries, simple ops.
+- Streaming heavy: JVM (Scala/Java) with Flink/Spark; expose outputs as contracts consumed by other stacks.
+- JS-first orgs: TypeScript with a CLI and HTTP façade; ensure bundling and Node version pinning.
+- Always separate adapters: Airflow/Dagster/Prefect/Temporal/ADF/Step Functions wrappers live in thin modules calling the same pure core.
+
+Portability pattern: CLI JSON in/out (works under any orchestrator)
+
+TypeScript CLI
+```ts
+#!/usr/bin/env node
+import * as fs from 'node:fs';
+
+function transform(record: any) {
+  return { id: record.id, email_domain: String(record.email).split('@')[1] };
+}
+
+const input = JSON.parse(fs.readFileSync(0, 'utf8')); // stdin
+const output = Array.isArray(input) ? input.map(transform) : transform(input);
+process.stdout.write(JSON.stringify(output));
+```
+
+Python CLI
+```python
+#!/usr/bin/env python3
+import sys, json
+
+def transform(rec: dict) -> dict:
+    return {"id": rec["id"], "email_domain": rec["email"].split("@")[1]}
+
+input_json = json.loads(sys.stdin.read())
+if isinstance(input_json, list):
+    out = [transform(r) for r in input_json]
+else:
+    out = transform(input_json)
+print(json.dumps(out))
+```
+
+Go gRPC façade (sketch)
+```go
+// Define protobuf for Transform(Request) returns (Response)
+// Implement server that calls pure core.Transform and returns JSON payloads.
+// Package as a single binary; provide HTTP/JSON via grpc-gateway if needed.
+```
+
+Operational guidance
+- Version the core separately from adapters; publish semver.
+- Provide golden test vectors (JSON in/out) and a conformance test so any adapter/provider can validate behavior.
+- Treat the CLI as the lowest common denominator; provider wrappers just marshal data to/from it.
+
+---
+
 ## Open-source component choices (OSS)
 
 Use proven OSS components per layer. Pick one per layer first; add complexity only when needed.
