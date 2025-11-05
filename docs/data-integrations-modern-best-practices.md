@@ -165,6 +165,18 @@ Continuous event processing.
 - **Cons**: more moving parts and operational complexity.
 
 #### Advanced: streaming semantics and correctness
+- Event design best practices
+  - Envelope: event_id (UUID), event_time (RFC 3339), producer, source, schema_version, trace/span ids, partition_key; optional sequence for strict ordering.
+  - Payload: immutable; additive evolution only; deprecate before removal; include idempotency_key if producer retries.
+  - Contracts: register schema; validate at publish and consume; attach content-type and schema id.
+  - Keys and partitions: choose business keys to preserve locality; avoid hot keys; consider hashing with salt.
+- Time semantics: processing time (when you see it) vs event time (when it happened). Use event time for business-correct windows.
+- Watermarking: a heuristic for “we’ve likely seen all events up to T”. Configure lateness (e.g., 5m) to balance correctness vs latency.
+- Windows: tumbling (fixed), sliding (overlap), session (gaps). Late data: either update aggregates (retractions) or route to a correction topic.
+- Delivery guarantees: at-least-once is common; achieve effectively-once with deterministic keys + idempotent sinks or transactional writes.
+- Checkpointing & state: periodic checkpoints with exactly-once state backends (e.g., Flink) + externalized state (RocksDB). Ensure checkpoint + sink commits are atomic or compensatable.
+- Partitioning: choose keys to avoid hotspots; rebalance when key skew emerges; use compacted topics for latest-state streams.
+- Backpressure: monitor lag and processing time; apply rate-limits at sources or scale out consumers; use bounded buffers.
 - Time semantics: processing time (when you see it) vs event time (when it happened). Use event time for business-correct windows.
 - Watermarking: a heuristic for “we’ve likely seen all events up to T”. Configure lateness (e.g., 5m) to balance correctness vs latency.
 - Windows: tumbling (fixed), sliding (overlap), session (gaps). Late data: either update aggregates (retractions) or route to a correction topic.
@@ -374,6 +386,8 @@ Mermaid diagram: SFTP batch intake
 ![SFTP batch intake](images/sftp-intake.png)
 
 Operational checklist
+- File contracts: add trailer records with record_count and control totals (e.g., sum of amounts) to detect truncation/corruption.
+- Sequence and idempotency: enforce monotonically increasing sequence numbers per partner; reject duplicates; reconcile gaps before post.
 - Rotate SSH keys regularly; enforce strong ciphers; disable password logins.
 - Enforce file size limits; reject unexpected mime types; scan attachments for malware.
 - Maintain a per-partner runbook (who to contact, SLAs, file contracts, escalation steps).
@@ -1082,6 +1096,14 @@ Version schemas and use **backward compatibility** (new data still works with ol
 
 ## Observability basics
 
+Data observability checks (additive to app telemetry)
+- Freshness: max(age(now, max(event_time|updated_at))) per table/partition; alert on SLO burn.
+- Volume: records per interval vs baseline; change point detection; alert on drops/spikes.
+- Schema: drift detection (new/removed/renamed fields); block breaking changes at ingress.
+- Quality: null-rate thresholds, unique constraints, value range checks; publish pass/fail as metrics.
+- Lineage: emit dataset in/out and code version/build SHA for each job; tie runs to commits and configurations.
+- Tools: Great Expectations/Soda, Monte Carlo/Bigeye (managed), OpenLineage + collector to catalog.
+
 ### Logging and data persistence rules
 
 - Do not log raw PII (personally identifiable information). Redact or hash with a keyed HMAC if correlation is required; never log secrets, API keys, access tokens, private keys, or full card numbers.
@@ -1093,6 +1115,12 @@ Version schemas and use **backward compatibility** (new data still works with ol
 - Add data lineage/context fields instead of content: file_name, checksum, record_count, schema_version, received_at.
 
 ### Idempotency and pagination rules
+
+Idempotency store patterns
+- Hash strategy: compute SHA-256 over stable request fields; store hash → result with TTL in Redis/DB; upsert on success only.
+- Bloom filter assist: for ultra-high volume, combine a Redis Bloom filter for fast probable-exists with a durable dedupe table.
+- TTL policy: retain keys through the maximum retry/replay window (commonly 24–72h); leak-test memory; purge via time-indexed keys.
+- Provenance: store job_id/run_id and source file/event metadata to trace how results were produced.
 
 Idempotency (safe to retry without changing the final result)
 - All ingestion endpoints and batch jobs must be idempotent. Use idempotency keys (deterministically derived identifiers) or natural keys + upsert semantics.
@@ -1342,6 +1370,12 @@ logError(new Error("Invalid schema"), { file_name: "bad.csv", row: 42 });
 ---
 
 ## Security and governance
+
+Warehouse access control patterns
+- Row-Level Security (RLS): policy-based filters per tenant/entity; bind to identity (service principal, user) and roles.
+- Column-level security/masking: restrict PII columns; dynamic data masking for dev/test; tokenize sensitive identifiers.
+- Per-tenant keys: envelope encrypt columns with per-tenant keys (BYOK/HYOK where required); rotate and audit.
+- Auditing: enable object-level logging; alert on privilege escalations and policy changes; least-privilege review cadence.
 
 ### Integration security best practices (deep dive)
 
@@ -1841,6 +1875,12 @@ Retention & GDPR
 
 ## Error handling, DLQs, and replay
 
+Operational runbooks & incident response
+- Cutoffs and holdbacks: define input cutoffs (e.g., T-5m) to absorb late events; publish freshness windows to consumers.
+- Feature flags: kill-switch per connector/partner; degrade to batch/polling on webhook failures.
+- Rollback: version models and configs; support blue/green for connectors; replay from bronze or DLQ with tags.
+- Paging: on-call rotation with runbooks; dashboards include lag, freshness, DLQ rate; auto-quarantine noisy partners.
+
 Error taxonomy
 - Distinguish transient (retryable), permanent (validation), and systemic (downstream outage) errors.
 
@@ -1920,6 +1960,12 @@ Quick selection
 ---
 
 ## Environments, CI/CD, and promotion
+
+SQL and pipeline quality gates
+- Linting: sqlfluff for SQL style/anti-patterns; black/ruff for Python; golangci-lint for Go.
+- Data diff: compare before/after tables (e.g., data-diff/dbt-data-diff) in CI for critical models.
+- State-aware builds: dbt build --state to limit work and detect unexpected changes.
+- Traceability: propagate OpenTelemetry trace context across extract → queue → transform → load; sample at edges.
 
 ![CI/CD promotion and gates](images/ci-cd.png)
 
