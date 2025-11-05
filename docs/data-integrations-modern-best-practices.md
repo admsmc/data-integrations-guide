@@ -17,14 +17,18 @@ This guide explains how to build reliable, modular, and composable data integrat
 
 ## TL;DR
 
-- Prefer **data contracts** (a machine-and-human readable agreement about schema and semantics) from day one using **schemas** (structured definitions of data fields and types) like [JSON Schema](https://json-schema.org/), or code-first schema libraries ([Zod](https://zod.dev/) for TypeScript, [Pydantic](https://docs.pydantic.dev/) for Python, [Circe](https://circe.github.io/circe/) for Scala).
-- Choose **batch** (process data in chunks on a schedule) for simplicity; choose **streaming** (process events continuously as they arrive) for freshness or **low-latency** requirements (low-latency: results are available very quickly).
-- Favor **ELT** (load raw, transform in the warehouse or lakehouse) for analytics; use **ETL** (Extract, Transform, Load: transform before loading) for operational sinks (systems you write to for operations) that require cleaned data upfront.
-- Use **CDC** (Change Data Capture) when you need near-real-time **replication** (keeping copies of data in sync) without **full-table scans** (reading the entire table).
-- Make every step **idempotent** (safe to re-run without changing the final result) and **observable** (emit metrics, logs, and traces that show what happened).
-- **Orchestrate** (coordinate and schedule tasks) with workflow tools like [Dagster](https://dagster.io/) or [Temporal](https://temporal.io/), and manage transformations with [dbt](https://www.getdbt.com/) (data build tool) or [Spark](https://spark.apache.org/) (distributed compute engine).
-- Test with **property-based testing** (automatically generate varied inputs to test properties), **contract tests** (verify producer and consumer agree on schema), and end-to-end checks.
-- Secure with **least privilege** (grant only the minimal access needed), **encryption at rest and in transit** (data is encrypted on disk and over the network), and **secrets management** (safe storage for credentials).
+- Start with data contracts and schemas; validate at the edges. Keep core logic pure and side‑effects at the boundaries.
+- Batch by default; adopt streaming only for freshness/SLAs. If streaming, use event time, watermarks, and explicit late‑data policies.
+- Prefer ELT for analytics; use ETL for operational sinks that need pre‑modeled data.
+- Use CDC (Debezium/Kafka Connect) when sources allow; plan snapshots, gaps, and schema evolution from day one.
+- Make every step idempotent with deterministic keys/manifests; add OpenTelemetry metrics/logs/traces for observability.
+- Orchestrate with Dagster/Temporal/ADF; transform with dbt/Spark; design for replay/backfill and DLQs.
+- Security: least privilege, secrets in a vault, PGP/mTLS for partners, log redaction; meet GDPR/CIP/IEC 62443 where applicable.
+- Deploy where it fits: iPaaS/serverless for SaaS flows; Kubernetes for high‑throughput/custom; warehouse‑native for ELT; on‑prem/Hyper‑V for OT/regulatory.
+- Stay portable: implement core in Python or Go; expose CLI JSON in/out and HTTP/gRPC façades; keep provider/orchestrator adapters thin.
+- Microsoft estate: APIM → Functions → Service Bus; Event Hubs → ADLS/Synapse; Purview + Private Endpoints.
+- Utilities: OT → edge gateway → log → stream → TSDB/lake; UTC/timezone discipline; estimation/substitution flags; regulatory exports.
+- Reliability/perf: checkpointing, retries with jitter, DLQs; SLOs on freshness/latency/error rate; compact/merge and tune costs.
 
 ---
 
