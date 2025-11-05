@@ -107,6 +107,38 @@ Continuous event processing.
 - **Pros**: low latency, incremental updates.
 - **Cons**: more moving parts and operational complexity.
 
+#### Advanced: streaming semantics and correctness
+- Time semantics: processing time (when you see it) vs event time (when it happened). Use event time for business-correct windows.
+- Watermarking: a heuristic for “we’ve likely seen all events up to T”. Configure lateness (e.g., 5m) to balance correctness vs latency.
+- Windows: tumbling (fixed), sliding (overlap), session (gaps). Late data: either update aggregates (retractions) or route to a correction topic.
+- Delivery guarantees: at-least-once is common; achieve effectively-once with deterministic keys + idempotent sinks or transactional writes.
+- Checkpointing & state: periodic checkpoints with exactly-once state backends (e.g., Flink) + externalized state (RocksDB). Ensure checkpoint + sink commits are atomic or compensatable.
+- Partitioning: choose keys to avoid hotspots; rebalance when key skew emerges; use compacted topics for latest-state streams.
+- Backpressure: monitor lag and processing time; apply rate-limits at sources or scale out consumers; use bounded buffers.
+
+Minimal Spark Structured Streaming example (event-time window + watermark)
+```scala
+import org.apache.spark.sql.functions._
+
+val events = spark
+  .readStream
+  .format("kafka")
+  .option("kafka.bootstrap.servers", "localhost:9092")
+  .option("subscribe", "events")
+  .load()
+
+val parsed = events.selectExpr("CAST(value AS STRING)")
+  .select(from_json(col("value"), schema).as("e"))
+  .select(col("e.*")) // expects fields id, ts, amount
+
+val agg = parsed
+  .withWatermark("ts", "5 minutes")
+  .groupBy(window(col("ts"), "15 minutes"))
+  .agg(sum("amount").as("amount_15m"))
+
+agg.writeStream.outputMode("update").format("console").start()
+```
+
 ---
 
 ### CDC (Change Data Capture)
@@ -121,6 +153,14 @@ Reads database **change logs** (append-only records of row changes).
 **Learn more (summaries)**
 - Debezium: open-source CDC connectors for MySQL/Postgres/SQL Server/Oracle; explains outbox patterns, schema evolution, and exactly-once considerations.
 - Kafka Connect: distributed connector runtime with sink/source connectors, offset management, and REST management API; covers scalability and fault tolerance.
+
+#### Advanced: CDC strategies and edge cases
+- Snapshots: initial full snapshot modes (blocking vs incremental) and cutover plans; use high-water mark + change tables.
+- Gaps and holes: handle missing LSN/SCN ranges; alert and re-snapshot affected partitions.
+- Schema evolution: map breaking DB changes (type widen/narrow, rename, split/merge columns) to compatible event schemas; use semantic versions.
+- Keys and updates: enforce stable primary keys; when keys change, emit tombstone + insert for compacted topics; downstream merges must handle updates vs deletes.
+- Transaction boundaries: leverage source transaction metadata to ensure write atomicity at sinks (e.g., MERGE with commit timestamp ordering).
+- Debezium specifics: outbox pattern, heartbeat topics, transaction metadata topics; tune snapshot.fetch.size, max.batch.size for stability.
 
 ---
 
@@ -564,6 +604,13 @@ Key cross-cutting controls for utilities
 - Backfill from historians/MDMS with idempotent merges.
 - Dual-run validations when changing estimators/substituters or tariff models.
 
+#### Advanced: utility-specific concerns
+- Time alignment & DST: align AMI intervals to service-point local time; store canonical UTC with timezone for replays; handle DST fall-back overlaps deterministically.
+- Estimation/substitution: document algorithms (last good value, linear interpolation, regression); version estimators and keep raw vs estimated flags.
+- Power quality (PQ): capture harmonics, voltage sags/swells; maintain higher-frequency telemetry in separate topics/retention tiers.
+- State estimation & topology: feed SCADA/GIS topology to estimators; keep model versions and ensure reproducibility across runs.
+- Regulatory exports: generate audit-ready extracts (EIA/NetDMR/PUC) from curated layers; lock schemas and keep lineages.
+
 #### Utilities diagrams
 
 ![Utilities OT-to-IT telemetry flow](images/utilities-ot-it-flow.png)
@@ -648,6 +695,13 @@ Operational guardrails (Azure)
 - Lock down Storage/Databricks/Synapse with Private Endpoints; route through Azure Firewall.
 - Purview scans for classification/lineage; enforce schema compatibility in CI for Delta tables.
 - Tag resources (owner, data-domain, sensitivity); automate cost and drift alerts.
+
+#### Advanced: Microsoft estate patterns
+- Graph delta queries & change notifications: consume differential feeds to avoid full scans; persist delta tokens securely.
+- Entra ID token caching: use Managed Identity/On-behalf-of flows; cache tokens with expiry and audience checks.
+- Event Hubs/Kafka tuning: choose partition keys, throughput units/processing units sizing, capture to ADLS for replay; consumer group isolation.
+- ADF Integration Runtime: self-hosted IR for on-prem; tune copy vs Mapping Data Flows; staged copy via ADLS for large DB loads.
+- Synapse/Fabric: serverless vs dedicated; Delta Lake features (Change Data Feed, OPTIMIZE/ZORDER in Databricks) and governance with Purview.
 
 #### Microsoft/Azure diagrams
 
@@ -881,6 +935,13 @@ Version schemas and use **backward compatibility** (new data still works with ol
 - **End-to-end tests** (run the entire pipeline on a small sample).
 
 **Tools**: [fast-check](https://fast-check.dev/) (TypeScript), [Hypothesis](https://hypothesis.readthedocs.io/) (Python), [ScalaCheck](https://scalacheck.org/) (Scala).
+
+#### Advanced: testing data systems
+- Contract testing in CI: verify schema compatibility (backward/full) against registry; run consumer-driven contract tests before deploy.
+- Differential testing: run old vs new models on the same sample and compare aggregates/distributions (tolerances per metric).
+- Property-based tests for transforms: invariants like conservation of sums, monotonic counters, idempotent merges.
+- Golden datasets: curated edge-case corpora (DST boundaries, nulls, Unicode, large numbers) for regressions; store under version control.
+- End-to-end with time travel: in ACID tables, test replay/backfill correctness by rewinding snapshots and re-applying jobs.
 
 ---
 
@@ -1520,6 +1581,12 @@ Policies
 Validation
 - Validate at ingress against the active registry version; log schema drift with alerts.
 
+#### Advanced: contract governance
+- Compatibility modes: select per subject (backward for events, full for critical commands); pin and enforce in CI with a registry check step.
+- Deprecation policy: add nullable fields + defaults; never reuse fields for new meanings; remove only after all consumers migrate.
+- Consumer-driven contracts: publish consumer expectations; run nightly to detect breaking changes from producers.
+- Multi-language codegen: generate DTOs from schema (Avro/Protobuf) for TS/Python/Scala to ensure parity; avoid hand-rolled parsers.
+
 ---
 
 ## Table design and storage (warehouse/lakehouse)
@@ -1541,6 +1608,13 @@ ACID tables
 Retention & GDPR
 - Implement per-table retention; support deletions with row-level deletes and metadata compaction.
 
+#### Advanced: lakehouse operations
+- Compaction & clustering: schedule OPTIMIZE/compaction; consider Z-ORDER (Databricks) or clustering keys for query pruning.
+- MERGE patterns: small-file writes → stage to temp then MERGE; for very large merges, use partition pruning and bloom filters.
+- Change Data Feed (Delta) / incremental reads (Hudi/Iceberg): drive downstream CDC from curated tables.
+- Deletes and privacy: use row-level deletes + compaction to physically remove data; verify by snapshot diff and storage scan.
+- Cost control: use column pruning and predicate pushdown; precompute heavy joins into denormalized marts where justified.
+
 ---
 
 ## Error handling, DLQs, and replay
@@ -1556,6 +1630,13 @@ Replay
 
 Mermaid: DLQ and replay
 ![DLQ and replay](images/dlq-replay.png)
+
+#### Advanced: orchestration, backfills, and reliability
+- Backfills: treat as first-class—parameterize by date/partition; isolate compute; cap concurrency to avoid hot partitions.
+- Sagas/compensation: for multi-step writes, implement compensating actions and idempotent checkpoints; persist progress markers.
+- Retry policies: classify error types; exponential backoff with jitter; circuit breakers on persistent failures; dead-letter after N attempts with context.
+- Dependency graphs: dynamic mapping (per-partition fan-out) with sensors for upstream partition completions; avoid global locks.
+- Two-phase patterns: outbox/inbox for transactional writes; producer writes to outbox within DB transaction; relay to log asynchronously.
 
 ---
 
@@ -1585,6 +1666,16 @@ Mermaid: DLQ and replay
 - Define RPO (recovery point) and RTO (recovery time); test disaster recovery regularly.
 - Multi-AZ/region for event backbone and stores; replication for catalogs and schema registries.
 - Back up configs, schemas, manifests; practice restore drills.
+
+---
+
+## Performance tuning and cost optimization
+
+- Kafka/Redpanda throughput: increase partitions for parallelism; batch produce; enable idempotent producer; tune linger.ms and batch.size.
+- Consumer scaling: max.poll.interval and session timeouts; cooperative rebalancing; commit strategies to balance throughput and correctness.
+- Warehouse performance: column pruning, predicate pushdown, broadcast joins wisely; cache hot datasets; use vectorized readers.
+- Orchestrator scaling: shard runs by partition; prefer small, idempotent tasks; avoid monolithic retries.
+- Storage costs: prefer Parquet, compress with ZSTD; compact small files; tier older data to cheaper storage with longer retrieval.
 
 ---
 
