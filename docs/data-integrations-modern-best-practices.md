@@ -1640,6 +1640,55 @@ Mermaid: DLQ and replay
 
 ---
 
+## Common deployment environments for integrations
+
+Choose an environment based on connectivity, compliance, scale, skills, and total cost of ownership (TCO). Most teams mix two or more for different flows.
+
+1) iPaaS / Integration Platforms (MuleSoft, Boomi, Workato, Azure Logic Apps, AWS AppFlow)
+- Pros: Fast time-to-value, rich connectors, visual flows, built-in retries/monitoring.
+- Cons: Vendor lock-in, per-action/run pricing, limited custom logic, source-control friction.
+- Fit: SaaS-to-SaaS, simple transformations, business-managed automations.
+
+2) Cloud-native serverless
+- AWS: Lambda, Step Functions, EventBridge, SQS/SNS, Glue, S3; Secrets Manager/KMS; PrivateLink.
+- Azure: Functions, Logic Apps, ADF, Event Grid, Service Bus; Key Vault; Private Endpoints.
+- GCP: Cloud Functions/Run, Workflows, Pub/Sub, Dataflow, Storage; Secret Manager; Private Service Connect.
+- Pros: Elastic, pay-per-use, first-class cloud security/networking; minimal ops.
+- Cons: Limits (runtime, memory, concurrency), cold starts, observability differences; longer-running jobs need orchestration.
+- Fit: Event-driven APIs/webhooks, micro-batch ELT, CDC fan-out.
+
+3) Containers & Kubernetes
+- Stack: Kubernetes + orchestration (Argo Workflows/Airflow/Dagster/Temporal), Kafka/Redpanda, Kafka Connect/Debezium, object storage.
+- Pros: Portability, full control, stateful/long-running workers, sidecars for auth/observability.
+- Cons: Ops overhead (cluster, upgrades, scaling), platform engineering needed.
+- Fit: Complex, high-throughput pipelines; hybrid networking; strict customization.
+
+4) Data warehouse/lakehouse–native
+- Snowflake Tasks/Streams, BigQuery scheduled queries/Dataform, Databricks Jobs/Delta Live Tables, dbt Cloud/Core.
+- Pros: Push down compute close to data; strong lineage/ACLs; simple scheduling.
+- Cons: Operational sinks and non-SQL logic harder; connector coverage varies.
+- Fit: Analytics ELT, transformations, mart materialization, reverse ETL with connectors.
+
+5) Managed streaming platforms
+- Confluent Cloud, Redpanda Cloud, Azure Event Hubs, Amazon MSK Serverless.
+- Pros: Durable logs, scalable fan-out, CDC-friendly, replayable.
+- Cons: Event modeling and schema governance required; cost at scale; exactly-once needs care.
+- Fit: Near-real-time integrations, multi-subscriber architectures, CDC replication.
+
+6) On‑prem / Hybrid / Edge (utilities & regulated)
+- Patterns: Self-hosted runtimes, private connectivity (VPN/MPLS), data diodes/DMZ, bastions; Azure IR for on-prem sources.
+- Pros: Local data residency, deterministic network, OT segmentation; compliance alignment (CIP/IEC 62443).
+- Cons: Hardware/ops cost, slower change management, connector gaps.
+- Fit: Plants/substations, on-prem ERPs/MDMS/LIMS, partners restricted to SFTP.
+
+Quick selection
+- Mostly SaaS-to-SaaS → iPaaS or serverless.
+- Heavy streaming/CDC → managed streaming + containers/serverless consumers.
+- Analytics-first → warehouse-native + dbt; operational sinks via services.
+- Strict on-prem/OT → Kubernetes on-prem + gateways; file drops with PGP/SFTP.
+
+---
+
 ## Environments, CI/CD, and promotion
 
 ![CI/CD promotion and gates](images/ci-cd.png)
