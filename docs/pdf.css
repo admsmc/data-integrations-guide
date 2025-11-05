@@ -1,0 +1,21 @@
+@page {
+  size: A4;
+  margin: 16mm;
+}
+
+/* Scale images to page width in PDF */
+img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* Avoid code blocks overflowing */
+pre, code {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Slightly smaller headings for print */
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.4em; }
+h3 { font-size: 1.2em; }
