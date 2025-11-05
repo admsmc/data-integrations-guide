@@ -261,6 +261,64 @@ You fetch on a schedule.
 
 ---
 
+## Data transfer protocols (overview)
+
+Choose protocols based on delivery guarantees, latency, payload size, device constraints, and partner capabilities.
+
+- HTTP/HTTPS (REST)
+  - Ubiquitous request/response APIs; cacheable GETs; pagination; retries with idempotency keys.
+  - Use for: CRUD APIs, pull-based integrations, reverse ETL selects via API.
+- GraphQL over HTTP
+  - Flexible queries; single endpoint; schema/typing; watch N+1 patterns and limits.
+  - Use for: tailored reads across multiple resources; when server supports persisted queries.
+- Webhooks (HTTP push)
+  - Source-initiated events; sign payloads; retry on 5xx; dedupe by event id.
+  - Use for: near-real-time event notifications from SaaS/partners.
+- gRPC (HTTP/2)
+  - Strong typing via Protobuf; bi-di streaming; low latency.
+  - Use for: internal services, high-throughput RPC, streaming transforms.
+- WebSockets / Server-Sent Events (SSE)
+  - Duplex (WS) or server→client (SSE) streams over a single connection.
+  - Use for: dashboards, near-real-time feeds to clients; less common in B2B data ingestion.
+- AMQP (0-9-1/1.0) — RabbitMQ, Azure Service Bus
+  - Queues/topics, ack/requeue, dead-lettering; transactional semantics vary by impl.
+  - Use for: command/event messaging with routing keys and backpressure.
+- Kafka protocol — Apache Kafka, Redpanda, Event Hubs (Kafka endpoint)
+  - Ordered partitions, durable log, consumer groups, replay; EOSv2 available.
+  - Use for: streaming pipelines, CDC fan-out, multi-subscriber architectures.
+- MQTT 3.1.1 / 5.0
+  - Pub/sub for constrained IoT; QoS 0/1/2; retained messages; last will/testament.
+  - Use for: device telemetry, edge→cloud gateways; bridge to Kafka for processing.
+- NATS / JetStream
+  - Lightweight pub/sub and KV/stream semantics; simple clients.
+  - Use for: low-latency internal messaging where Kafka is heavy.
+- CoAP
+  - UDP-based for constrained devices; request/response and observe; DTLS.
+  - Use for: sensor networks with tight bandwidth/energy constraints.
+- SFTP/FTPS/SCP
+  - Batch files over SSH/TLS; contracts on naming, checksums, PGP; atomic renames.
+  - Use for: legacy and partner file exchanges.
+- AS2 / EDI transport
+  - Signed/encrypted B2B file exchange over HTTP with MDN receipts; common in retail.
+  - Use for: EDI documents (X12/EDIFACT) when partners require AS2.
+- OPC UA (OT)
+  - Industrial telemetry/command; rich type system and browsing; secure channels.
+  - Use for: plant/SCADA integrations, often bridged to MQTT/Kafka.
+
+Security and reliability notes
+- Always encrypt in transit (TLS/DTLS/SSH). Bind parameters for SQL-over-HTTP; verify webhook signatures.
+- Apply backpressure: consumer groups, acks, flow control; use DLQs.
+- Define idempotency and ordering: keys, sequence numbers, or event time + watermarks.
+
+Decision guide (quick)
+- Human-facing APIs → HTTP/REST/GraphQL.
+- Streaming analytics/CDC → Kafka protocol.
+- Device/edge → MQTT/OPC UA; bridge to Kafka.
+- B2B files → SFTP/AS2; validate and land to bronze.
+- Internal RPC → gRPC; batch jobs → HTTP + retry with backoff.
+
+---
+
 ### Orchestrators and dataflow engines
 
 #### Orchestrator
