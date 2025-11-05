@@ -29,6 +29,9 @@ This guide explains how to build reliable, modular, and composable data integrat
 - Microsoft estate: APIM → Functions → Service Bus; Event Hubs → ADLS/Synapse; Purview + Private Endpoints.
 - Utilities: OT → edge gateway → log → stream → TSDB/lake; UTC/timezone discipline; estimation/substitution flags; regulatory exports.
 - Reliability/perf: checkpointing, retries with jitter, DLQs; SLOs on freshness/latency/error rate; compact/merge and tune costs.
+- Protocols: HTTP/REST/GraphQL for APIs; Kafka for streaming/CDC; MQTT for device/edge; SFTP/AS2 for B2B files; gRPC for internal RPC.
+- ODBC/JDBC: when API/CDC unavailable, use read‑only drivers with TLS, pushdown projection/filters, keyset pagination, snapshot isolation; prefer CDC when possible.
+- Data observability: enforce freshness, volume, schema/quality gates; alert on SLO burn; block breaking changes at ingress.
 
 ---
 
