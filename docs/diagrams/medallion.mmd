@@ -1,0 +1,8 @@
+flowchart LR
+Bronze[Bronze Raw Landing] --> Silver[Silver Cleaned Conformed]
+  Silver --> Gold[Gold Business Marts]
+  Bronze --> Quarantine[Quarantine]
+  Silver --> QA[Quality Gates Tests]
+  Gold --> Serving[BI APIs ML]
+
+  Bronze -->|Replay| Silver

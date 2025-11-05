@@ -91,6 +91,50 @@ Good for analytics and agility.
 - **Pros**: keeps raw history, flexible transformations.
 - **Cons**: requires warehouse or lake compute and governance.
 
+#### Deep dive: ETL vs ELT
+- Where transforms run
+  - ETL: transforms in an intermediate compute (ETL tool, Spark job) before the destination; the destination receives curated data only.
+  - ELT: raw lands first; transforms run inside the warehouse/lakehouse (SQL/dbt) or over lake engines (Spark/Flink).
+- Cost and performance
+  - ETL: pay compute outside the warehouse; smaller storage footprint but fewer chances to re‑model.
+  - ELT: store once, compute many; exploit MPP/elastic warehouses; use columnar formats (Parquet) and table formats (Delta/Iceberg/Hudi).
+- Latency and freshness
+  - ETL: faster queries at arrival (already modeled) but longer pipelines to build.
+  - ELT: faster ingest, model later; streaming ELT uses incremental MERGE/UPSERT into ACID tables.
+- Governance and lineage
+  - ETL: curated inputs, fewer consumers; lineage spans multiple systems.
+  - ELT: raw + refined kept; strong lineage from raw → silver → gold with tests and contracts at each hop.
+- Backfills and reproducibility
+  - ETL: often re‑extract from sources; risk of drift if sources changed.
+  - ELT: replay from raw (bronze) deterministically; versioned models and time travel.
+- When to choose
+  - ETL: operational sinks (PSPs, ERPs) that require strict interfaces; sensitive PII minimization before landing.
+  - ELT: analytics/ML feature pipelines, exploratory modeling, and incremental CDC.
+
+#### Medallion architecture (Bronze/Silver/Gold)
+- Bronze (a.k.a. Raw/Landing)
+  - Purpose: immutable landing of raw events/files; one row per event/record; minimal parsing; append‑only.
+  - Contracts/metadata: source id, ingest time, checksum, schema_version, file_name/offsets; store as Parquet (preferred) or JSON.
+  - Quality: basic schema validation, quarantine corrupt rows; no business rules enforced.
+  - Retention: longest; enables replay/backfill; partition by ingest_date/source.
+- Silver (a.k.a. Cleaned/Conformed)
+  - Purpose: normalized types, deduplicated, conformed dimensions (ids, enums), PII handling (mask/tokenize), timezone normalization (UTC).
+  - Quality: strong schema with constraints (not null, value ranges), referential checks, idempotent MERGE from bronze.
+  - Patterns: SCD Type 1 for corrections, Type 2 for history; CDC apply with upserts and tombstones.
+  - Partition/sort: business keys and updated_at for efficient merges.
+- Gold (a.k.a. Business marts/serving)
+  - Purpose: business‑ready aggregates (facts/dimensions), KPIs, denormalized wide tables for BI and APIs.
+  - Quality: dbt tests (unique, not_null, relationships), reconciliation totals; SLAs on freshness.
+  - Patterns: incremental models with window boundaries; snapshot tables for point‑in‑time reporting.
+- Optional layers: Platinum/Features for low‑latency serving (feature store), Sandbox for experiments (short retention).
+
+Operational rules
+- Every hop is idempotent and test‑gated; schema versions are explicit and backward compatible.
+- Use ACID table formats (Delta/Iceberg/Hudi) for upserts/time travel; vacuum/compact regularly.
+- Document the contract per layer; expose catalog/lineage (DataHub/Purview) and SLAs.
+
+![Bronze Silver Gold flow](images/medallion.png)
+
 ---
 
 ### Batch vs streaming
