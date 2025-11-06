@@ -1,0 +1,14 @@
+sequenceDiagram
+  autonumber
+  participant CL as Client
+  participant API as API
+  CL->>API: GET /items?limit=100
+  API-->>CL: 200 OK { items..., next_cursor }
+  alt more pages
+    CL-->>CL: Store next_cursor, process page
+    CL->>API: GET /items?limit=100&cursor=next_cursor
+    API-->>CL: 200 OK { items..., next_cursor }
+  else done
+    CL-->>CL: No next_cursor, complete
+  end
+  Note over CL,API: Backoff on 429/503 and resume with last cursor

@@ -1,0 +1,89 @@
+flowchart TB
+    subgraph Ingestion["Data Ingestion"]
+        Source[Raw Data with PII<br/>SSN: 123-45-6789<br/>Email: user@example.com<br/>CC: 4532-1234-5678-9010] --> Classify[Classify Data<br/>Scan for PII patterns]
+        
+        Classify --> Detect[Detect:<br/>• SSN patterns<br/>• Email addresses<br/>• Credit card numbers<br/>• Phone numbers<br/>• IP addresses]
+    end
+    
+    subgraph Bronze["Bronze Layer Strategy"]
+        Detect --> BronzeChoice{Regulatory<br/>requirements?}
+        
+        BronzeChoice -->|High sensitivity| Encrypt[Encrypt at rest<br/>KMS managed keys<br/>Store encrypted in Bronze]
+        BronzeChoice -->|Standard| StoreRaw[Store raw in Bronze<br/>Strict access controls<br/>RLS policies]
+        
+        Encrypt --> BronzeMeta[Add metadata:<br/>• _contains_pii: true<br/>• _pii_fields: SSN,email,CC<br/>• _classification: confidential]
+        StoreRaw --> BronzeMeta
+    end
+    
+    subgraph Silver["Silver Layer Processing"]
+        BronzeMeta --> Process[Process Bronze → Silver]
+        
+        Process --> Strategy{PII<br/>Handling<br/>Strategy}
+        
+        Strategy -->|Masking| Mask[Dynamic Masking<br/>user@example.com → u***@e***.com<br/>123-45-6789 → ***-**-6789]
+        
+        Strategy -->|Tokenization| Token[Tokenization<br/>SSN → token_abc123<br/>Store mapping in secure vault<br/>Detokenize only when needed]
+        
+        Strategy -->|Hashing| Hash[One-way Hashing<br/>email → SHA256 hash<br/>For analytics without PII]
+        
+        Strategy -->|Pseudonymization| Pseudo[Pseudonymization<br/>Reversible with key<br/>For testing/development]
+        
+        Strategy -->|Deletion| Delete[Field Deletion<br/>Remove PII entirely<br/>If not required downstream]
+        
+        Mask --> SilverStore[silver.customers<br/>Masked/tokenized PII<br/>_pii_masked: true]
+        Token --> SilverStore
+        Hash --> SilverStore
+        Pseudo --> SilverStore
+        Delete --> SilverStore
+    end
+    
+    subgraph AccessControl["Access Control"]
+        SilverStore --> RLS[Row-Level Security<br/>Tenant isolation<br/>User sees only their data]
+        
+        RLS --> ColSec[Column-Level Security<br/>Role-based access:<br/>• Analysts: see masked<br/>• Compliance: see full<br/>• Dev/Test: see hashed]
+        
+        ColSec --> Audit[Audit Logging<br/>Track all PII access:<br/>• Who<br/>• When<br/>• What fields<br/>• Query details]
+    end
+    
+    subgraph Environments["Environment-Specific"]
+        Production[Production:<br/>Full encryption<br/>Tokenization<br/>Strict auditing]
+        
+        Staging[Staging:<br/>Masked/hashed PII<br/>Synthetic data preferred]
+        
+        DevTest[Dev/Test:<br/>Fully synthetic data<br/>OR heavily masked<br/>OR subset with consent]
+    end
+    
+    subgraph Compliance["Compliance & DSRs"]
+        DSR[Data Subject Request<br/>Right to be forgotten<br/>Right to access]
+        
+        DSR --> Locate[Locate PII:<br/>Query lineage<br/>Find all copies across:<br/>• Bronze/Silver/Gold<br/>• Backups<br/>• Archives<br/>• DLQ]
+        
+        Locate --> Action{Request<br/>Type}
+        Action -->|Delete| Purge[Delete from all layers<br/>Compact tables<br/>Vacuum to physical delete<br/>Document deletion]
+        Action -->|Access| Export[Export all PII<br/>Provide to subject<br/>Log access]
+        
+        Purge --> Verify[Verify deletion<br/>Storage scan<br/>Snapshot diff]
+    end
+    
+    subgraph Logging["Logging Best Practices"]
+        Log[Application Logs] --> Redact[Auto-Redact PII<br/>RegEx patterns<br/>Library: pino redact paths]
+        
+        Redact --> LogStore[Store logs with:<br/>• Correlation IDs<br/>• File checksums<br/>• Record counts<br/>NO raw PII]
+        
+        LogStore --> Retention[Retention Policy<br/>7-90 days<br/>Longer only if required<br/>Immutable audit logs]
+    end
+    
+    subgraph Vault["Token Vault"]
+        TokenVault[Secure Token Vault<br/>Encrypted storage<br/>Audit all lookups]
+        Token -.-> TokenVault
+        
+        TokenVault --> Detokenize[Detokenize only:<br/>• By authorized services<br/>• With business justification<br/>• Logged and alerted]
+    end
+    
+    style Detect fill:#ffe8cc
+    style BronzeChoice fill:#fff4e1
+    style Strategy fill:#fff4e1
+    style Audit fill:#e1f5ff
+    style Purge fill:#ffe1e1
+    style TokenVault fill:#f0e1ff
+    style Redact fill:#e7f5e1

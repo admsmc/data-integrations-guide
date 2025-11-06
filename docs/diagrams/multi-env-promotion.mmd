@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph Dev["Development Environment"]
+        DevCode[Developer commits code] --> DevCI[CI Pipeline Triggered]
+        DevCI --> DevLint[Lint & Format<br/>sqlfluff, black, prettier]
+        DevLint --> DevUnit[Unit Tests<br/>Pure function tests]
+        DevUnit --> DevContract[Contract Tests<br/>Schema compatibility check]
+        DevContract --> DevBuild[Build artifacts<br/>Lock dependencies]
+    end
+    
+    subgraph Test["Test Environment"]
+        DevBuild --> TestDeploy[Deploy to Test<br/>Small sample data]
+        TestDeploy --> TestRun[Run pipeline end-to-end<br/>dbt build --state]
+        TestRun --> TestQuality[Quality Gates<br/>• dbt tests: not_null, unique<br/>• Great Expectations checks<br/>• Reconciliation totals]
+        TestQuality --> TestDiff[Data Diff<br/>Compare before/after<br/>Expected vs actual]
+        TestDiff --> TestPass{All gates<br/>passed?}
+        TestPass -->|No| TestFail[Block promotion<br/>Notify developer]
+        TestPass -->|Yes| TestApprove[Manual approval<br/>for production]
+    end
+    
+    subgraph Staging["Staging Environment"]
+        TestApprove --> StageDeploy[Deploy to Staging<br/>Production-like data<br/>subset or synthetic]
+        StageDeploy --> StageSmoke[Smoke Tests<br/>Critical path validation]
+        StageSmoke --> StageSoak[Soak Test<br/>Run for 1+ hour<br/>Monitor metrics]
+        StageSoak --> StageValidate{Performance<br/>& quality OK?}
+        StageValidate -->|No| StageRollback[Rollback<br/>Investigate issues]
+        StageValidate -->|Yes| StageReady[Ready for production]
+    end
+    
+    subgraph Prod["Production Environment"]
+        StageReady --> ProdStrategy{Deployment<br/>strategy?}
+        
+        ProdStrategy -->|Blue/Green| BlueGreen[Deploy to Green<br/>Run both side-by-side<br/>Validate Green<br/>Switch traffic]
+        ProdStrategy -->|Canary| Canary[Deploy to 5% traffic<br/>Monitor SLIs/SLOs<br/>Gradual rollout:<br/>5% → 25% → 50% → 100%]
+        ProdStrategy -->|Rolling| Rolling[Rolling update<br/>One partition at a time]
+        
+        BlueGreen --> ProdMonitor[Monitor Production<br/>• Freshness<br/>• Error rate<br/>• Data quality<br/>• SLO burn rate]
+        Canary --> ProdMonitor
+        Rolling --> ProdMonitor
+        
+        ProdMonitor --> ProdHealth{Healthy?}
+        ProdHealth -->|No| ProdRollback[Automatic Rollback<br/>Restore previous version]
+        ProdHealth -->|Yes| ProdComplete[Deployment Complete<br/>Update lineage & catalog]
+    end
+    
+    subgraph Gates["Quality Gate Details"]
+        G1[Contract Tests:<br/>• Schema compatibility<br/>• Consumer-driven contracts<br/>• API spec validation]
+        
+        G2[Data Quality:<br/>• Freshness thresholds<br/>• Volume anomaly detection<br/>• NULL rate checks<br/>• Referential integrity]
+        
+        G3[Performance:<br/>• Query time < SLA<br/>• Resource usage within limits<br/>• No table lock contention]
+    end
+    
+    subgraph StateManagement["State-Aware Builds"]
+        State[dbt: --state flag<br/>Compare with previous run<br/>Detect unexpected changes<br/>Run only modified models<br/>+ downstream dependencies]
+    end
+    
+    TestQuality -.-> G1
+    TestQuality -.-> G2
+    StageSoak -.-> G3
+    TestRun -.-> State
+    
+    style TestPass fill:#fff4e1
+    style TestFail fill:#ffe1e1
+    style StageValidate fill:#fff4e1
+    style ProdHealth fill:#fff4e1
+    style ProdRollback fill:#ffe1e1
+    style ProdComplete fill:#e7f5e1

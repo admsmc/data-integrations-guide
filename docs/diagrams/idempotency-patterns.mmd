@@ -1,0 +1,17 @@
+flowchart TB
+    Start([Incoming Request]) --> Hash[Compute Idempotency Key<br/>Header or SHA-256 of body]
+    Hash --> Check{Key exists<br/>in cache?}
+    Check -->|Yes| Return[Return Cached Response<br/>Status + Body]
+    Check -->|No| Process[Process Request<br/>Business Logic]
+    Process --> Success{Success?}
+    Success -->|Yes| Store[Store Response in Cache<br/>with TTL 24-72h]
+    Success -->|No| Error[Return Error<br/>Do NOT cache]
+    Store --> Send[Send Response to Client]
+    Return --> End([End])
+    Send --> End
+    Error --> End
+    
+    style Hash fill:#e1f5ff
+    style Check fill:#fff4e1
+    style Store fill:#e7f5e1
+    style Error fill:#ffe1e1

@@ -1,0 +1,24 @@
+sequenceDiagram
+  autonumber
+  participant P as Producer (SaaS)
+  participant E as Edge/API
+  participant V as Verifier
+  participant H as Handler
+  Note over P,E: Sends webhook with timestamp and signature
+  P->>E: POST /webhook {body}
+  E->>V: Verify timestamp within window
+  V-->>E: ok/expired
+  alt expired
+    E-->>P: 401 Unauthorized (replay)
+  else ok
+    E->>V: Compute expected HMAC(secret, timestamp + "." + body)
+    V-->>E: expected_signature
+    E-->>E: timingSafeEqual(signature, expected_signature)
+    alt match
+      E->>H: Process payload
+      H-->>E: 200 OK
+      E-->>P: 200 OK
+    else mismatch
+      E-->>P: 401 Unauthorized (bad signature)
+    end
+  end

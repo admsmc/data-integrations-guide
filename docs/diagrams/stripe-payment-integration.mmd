@@ -1,0 +1,67 @@
+sequenceDiagram
+    participant Customer
+    participant Frontend as Frontend/Mobile App
+    participant Backend as Backend API
+    participant Stripe as Stripe API
+    participant Webhook as Webhook Handler
+    participant DB as Database
+    participant Kafka
+    participant Analytics as Analytics/Data Warehouse
+    
+    Note over Customer,Stripe: Payment Intent Flow
+    Customer->>Frontend: Initiate purchase ($50)
+    Frontend->>Backend: POST /api/checkout<br/>{items, amount}
+    
+    Backend->>DB: BEGIN TRANSACTION
+    Backend->>DB: INSERT order<br/>status=pending
+    Backend->>Stripe: Create Payment Intent<br/>amount=5000, currency=usd<br/>metadata: {order_id, user_id}
+    Stripe-->>Backend: PaymentIntent<br/>id: pi_xxx, client_secret
+    Backend->>DB: UPDATE order<br/>stripe_payment_intent_id=pi_xxx
+    Backend->>DB: COMMIT
+    
+    Backend-->>Frontend: {client_secret, order_id}
+    
+    Note over Customer,Frontend: Client-side payment collection
+    Frontend->>Frontend: Stripe.js collects card<br/>(PCI compliant, never touches backend)
+    Frontend->>Stripe: confirmCardPayment(client_secret)<br/>with card details
+    
+    Note over Stripe: Stripe processes payment
+    Stripe->>Stripe: Validate card, check fraud
+    Stripe-->>Frontend: PaymentIntent succeeded
+    Frontend->>Frontend: Show success to customer
+    
+    Note over Stripe,Webhook: Asynchronous webhook events
+    Stripe->>Webhook: POST /webhooks/stripe<br/>Event: payment_intent.succeeded<br/>Signature: stripe-signature header
+    
+    Webhook->>Webhook: Verify signature (HMAC)
+    Webhook->>DB: BEGIN TRANSACTION
+    Webhook->>DB: INSERT webhook_events<br/>ON CONFLICT DO NOTHING<br/>(idempotency: event.id)
+    
+    alt Event not duplicate
+        Webhook->>DB: UPDATE order<br/>status=paid, paid_at=now()
+        Webhook->>Kafka: Publish payment.completed<br/>{order_id, amount, timestamp}
+        Webhook->>DB: UPDATE webhook_events<br/>processed_at=now()
+    else Duplicate event (replay)
+        Webhook->>Webhook: Skip processing
+    end
+    
+    Webhook->>DB: COMMIT
+    Webhook-->>Stripe: 200 OK
+    
+    Note over Kafka,Analytics: Async data pipeline
+    Kafka->>Analytics: Consume payment events
+    Analytics->>Analytics: Transform & aggregate
+    Analytics->>Analytics: Store in data warehouse
+    
+    Note over Stripe,Webhook: Handle refund
+    Backend->>Stripe: Create Refund<br/>payment_intent=pi_xxx
+    Stripe-->>Backend: Refund id: re_xxx
+    Stripe->>Webhook: Event: charge.refunded
+    Webhook->>DB: UPDATE order status=refunded
+    Webhook->>Kafka: Publish payment.refunded
+    
+    Note over Stripe,Analytics: Daily reconciliation
+    Backend->>Stripe: GET /v1/balance_transactions<br/>created[gte]=yesterday
+    Stripe-->>Backend: List of transactions<br/>with net amounts
+    Backend->>DB: Reconcile:<br/>sum(captures) - sum(refunds)<br/>- sum(fees) = net payout
+    Backend->>Analytics: Store reconciliation report

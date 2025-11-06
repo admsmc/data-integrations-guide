@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant Source as Source DB
+    participant CDC as CDC Connector
+    participant Log as Change Log
+    participant Dest as Destination
+    
+    Note over CDC: Phase 1: Initial Snapshot
+    CDC->>Source: Start snapshot at LSN/SCN 1000
+    Source-->>CDC: Full table scan
+    CDC->>Dest: Bulk insert snapshot data
+    
+    Note over Source,Log: Meanwhile: changes continue<br/>LSN 1001, 1002, 1003...
+    
+    Note over CDC: Phase 2: High-Water Mark
+    CDC->>CDC: Record HWM: LSN 1000
+    
+    Note over CDC: Phase 3: Cutover to CDC
+    CDC->>Log: Read changes from LSN 1001
+    Log-->>CDC: Change events 1001-1050
+    CDC->>Dest: Apply INSERTs, UPDATEs, DELETEs
+    
+    Note over CDC: Continuous streaming
+    loop Every batch
+        CDC->>Log: Poll for new changes
+        Log-->>CDC: Recent events
+        CDC->>Dest: Apply changes (upsert)
+    end
+    
+    Note over CDC,Dest: Gap Detection
+    CDC->>CDC: Check LSN sequence
+    CDC->>CDC: Alert on missing LSN range
+    CDC->>Source: Re-snapshot affected partition

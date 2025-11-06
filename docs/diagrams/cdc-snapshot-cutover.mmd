@@ -1,0 +1,27 @@
+flowchart LR
+  subgraph Source
+    DB[(Source DB)]
+  end
+  subgraph Landing
+    Snap[Initial Snapshot]
+    WM[Capture High-water Mark]
+  end
+  subgraph Stream
+    Debezium[Debezium/CDC Connector]
+    Log[(Change Log / Kafka)]
+  end
+  subgraph Apply
+    Bronze[Bronze Raw]
+    Silver[Silver Conformed]
+  end
+
+  DB --> Snap --> Bronze
+  Snap --> WM
+  WM -. watermark .-> Debezium
+  Debezium --> Log --> ApplyChanges[Apply Changes (ordered, idempotent MERGE)] --> Silver
+
+  Cutover{Cutover}
+  WM --> Cutover
+  Cutover -->|switch to| ApplyChanges
+
+  note right of ApplyChanges: Enforce ordering by commit_ts<br/>Handle tombstones/deletes<br/>Idempotent upserts

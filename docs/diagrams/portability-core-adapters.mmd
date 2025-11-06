@@ -1,0 +1,25 @@
+flowchart LR
+  subgraph Core
+    Core[Pure Core Library]
+  end
+  subgraph Facades
+    CLI[CLI (stdin JSON → stdout JSON)]
+    HTTP[HTTP/JSON Service]
+    gRPC[gRPC Service]
+  end
+  subgraph Adapters
+    Airflow[Airflow/Dagster/Prefect Wrapper]
+    Temporal[Temporal Worker]
+    Cloud[Serverless Adapter]
+  end
+
+  Core --> CLI
+  Core --> HTTP
+  Core --> gRPC
+
+  CLI --> Airflow
+  HTTP --> Cloud
+  gRPC --> Temporal
+
+  note right of Core: Pure functions only<br/>No provider SDKs
+  note right of Adapters: Thin, effectful edges only

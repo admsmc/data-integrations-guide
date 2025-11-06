@@ -1,0 +1,53 @@
+flowchart TB
+    subgraph Producer["Schema Evolution"]
+        V1[Version 1<br/>name, email] --> V2[Version 2<br/>name, email, phone*]
+        V2 --> V3[Version 3<br/>name, email, phone*, address*]
+        
+        Note1[* = optional with default]
+    end
+    
+    subgraph Backward["BACKWARD Compatible"]
+        B1[New schema<br/>can read old data] --> B2[✓ Add optional fields<br/>✓ Delete fields]
+        B2 --> B3[✗ Delete required fields<br/>✗ Change field type]
+        
+        Example1[Old consumer<br/>reads new data]
+    end
+    
+    subgraph Forward["FORWARD Compatible"]
+        F1[Old schema<br/>can read new data] --> F2[✓ Delete optional fields<br/>✓ Add fields]
+        F2 --> F3[✗ Add required fields<br/>✗ Change field type]
+        
+        Example2[New producer<br/>old consumer works]
+    end
+    
+    subgraph Full["FULL Compatible"]
+        FU1[Both directions work] --> FU2[✓ Add/delete<br/>optional fields only]
+        FU2 --> FU3[Default values required]
+        
+        Example3[Mix of old/new<br/>producers & consumers]
+    end
+    
+    subgraph Registry["Schema Registry Workflow"]
+        R1[Developer: Update schema] --> R2[CI: Validate compatibility]
+        R2 --> R3{Compatible<br/>with mode?}
+        R3 -->|Yes| R4[Register new version]
+        R3 -->|No| R5[Block & notify]
+        R4 --> R6[Consumers auto-fetch<br/>new schema]
+    end
+    
+    subgraph Deprecation["Deprecation Policy"]
+        D1[Mark field deprecated<br/>in schema metadata] --> D2[Announce to consumers<br/>6+ month notice]
+        D2 --> D3[Monitor usage<br/>via telemetry]
+        D3 --> D4{All consumers<br/>migrated?}
+        D4 -->|Yes| D5[Remove field<br/>new schema version]
+        D4 -->|No| D6[Extend deadline<br/>Continue support]
+    end
+    
+    V3 --> R1
+    
+    style B2 fill:#e7f5e1
+    style F2 fill:#e7f5e1
+    style FU2 fill:#e7f5e1
+    style R3 fill:#fff4e1
+    style R5 fill:#ffe1e1
+    style D4 fill:#fff4e1

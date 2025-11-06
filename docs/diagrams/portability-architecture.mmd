@@ -1,0 +1,65 @@
+flowchart TB
+    subgraph Core["Pure Core Library (No I/O)"]
+        Validate[Validate<br/>Schema checks] --> Transform[Transform<br/>Pure functions]
+        Transform --> Plan[Plan Upserts<br/>Deterministic logic]
+        
+        Schema[JSON Schema/<br/>Avro/Protobuf] --> Validate
+        
+        Note1[No provider SDKs<br/>No side effects<br/>Testable in isolation]
+    end
+    
+    subgraph Facades["Multiple Façades"]
+        CLI[CLI Binary<br/>stdin JSON → stdout JSON]
+        HTTP[HTTP/REST API<br/>POST /transform]
+        gRPC[gRPC Service<br/>Transform RPC]
+        Library[Library API<br/>import & call directly]
+    end
+    
+    Core --> CLI
+    Core --> HTTP
+    Core --> gRPC
+    Core --> Library
+    
+    subgraph Adapters["Provider/Orchestrator Adapters"]
+        CLI --> AirflowOp[Airflow Operator<br/>BashOperator calls CLI]
+        CLI --> Lambda[AWS Lambda<br/>spawns CLI process]
+        
+        HTTP --> K8s[Kubernetes Job<br/>HTTP sidecar]
+        HTTP --> CloudRun[Cloud Run service]
+        
+        gRPC --> Temporal[Temporal Workflow<br/>Activity calls gRPC]
+        
+        Library --> Dagster[Dagster Asset<br/>Python import]
+        Library --> Prefect[Prefect Task<br/>Python import]
+        Library --> ADF[Azure Data Factory<br/>Custom Activity .NET]
+    end
+    
+    subgraph Sources["I/O Adapters (Thin)"]
+        S3[S3 Reader] --> Core
+        ADLS[ADLS Reader] --> Core
+        API[REST API Client] --> Core
+        DB[Database Driver] --> Core
+    end
+    
+    subgraph Sinks["I/O Adapters (Thin)"]
+        Core --> Warehouse[Warehouse Writer<br/>Snowflake/BigQuery/Databricks]
+        Core --> KafkaSink[Kafka Producer]
+        Core --> APISink[API Client<br/>with retries]
+    end
+    
+    subgraph Config["Configuration"]
+        Env[Environment Variables<br/>12-factor] --> Adapters
+        Secrets[Secrets Manager<br/>Vault/KMS] --> Adapters
+    end
+    
+    subgraph Observability["Observability"]
+        OTel[OpenTelemetry<br/>Traces/Metrics/Logs] --> All
+        All[All components emit<br/>structured telemetry]
+    end
+    
+    style Core fill:#e7f5e1
+    style CLI fill:#e1f5ff
+    style HTTP fill:#e1f5ff
+    style gRPC fill:#e1f5ff
+    style Library fill:#e1f5ff
+    style Validate fill:#fff4e1

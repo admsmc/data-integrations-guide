@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  participant CL as Client
+  participant GW as API Gateway
+  participant SRV as Service
+  participant IDS as Idempotency Store
+  Note over CL: Generates Idempotency-Key (UUID)
+  CL->>GW: POST /transfers (Idempotency-Key: K)
+  GW->>SRV: Forward request + key
+  SRV->>IDS: Lookup(K)
+  alt not found
+    SRV-->>IDS: Put(K, PENDING)
+    SRV-->>SRV: Process create (deterministic)
+    SRV-->>IDS: Put(K, SUCCESS, response_hash)
+    SRV-->>GW: 201 Created + Location
+    GW-->>CL: 201 Created + Location
+  else found SUCCESS
+    SRV-->>GW: Replay cached response (200/201)
+    GW-->>CL: Replay (idempotent)
+  else found PENDING
+    SRV-->>GW: 409/429 Retry-After (optional)
+    GW-->>CL: Advise retry
+  end

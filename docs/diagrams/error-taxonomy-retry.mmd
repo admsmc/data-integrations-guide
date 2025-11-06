@@ -1,0 +1,53 @@
+flowchart TB
+    Start([Error Occurs]) --> Classify{Classify<br/>Error Type}
+    
+    Classify -->|Transient| Trans[Transient Error<br/>Network timeout<br/>Rate limit 429<br/>Service unavailable 503]
+    Classify -->|Permanent| Perm[Permanent Error<br/>Validation failure 400<br/>Auth failure 401/403<br/>Not found 404<br/>Bad schema]
+    Classify -->|Systemic| Sys[Systemic Error<br/>Downstream outage<br/>Database unavailable<br/>Kafka broker down]
+    
+    Trans --> Retry1[Retry Attempt 1<br/>Backoff: 1s]
+    Retry1 --> Success1{Success?}
+    Success1 -->|No| Retry2[Retry Attempt 2<br/>Backoff: 2s + jitter]
+    Success1 -->|Yes| Complete([Complete])
+    
+    Retry2 --> Success2{Success?}
+    Success2 -->|No| Retry3[Retry Attempt 3<br/>Backoff: 4s + jitter]
+    Success2 -->|Yes| Complete
+    
+    Retry3 --> Success3{Success?}
+    Success3 -->|Yes| Complete
+    Success3 -->|No| MaxRetries[Max Retries Reached]
+    
+    Perm --> DLQ[Route to Dead Letter Queue<br/>+ Original payload<br/>+ Error context<br/>+ Timestamp]
+    
+    Sys --> CB{Circuit<br/>Breaker<br/>State}
+    CB -->|Closed| Attempt[Attempt request]
+    CB -->|Open| Fail[Fast fail<br/>Return error immediately]
+    CB -->|Half-Open| Test[Test request]
+    
+    Attempt --> Outcome{Success?}
+    Outcome -->|Yes| Reset[Reset failure count]
+    Outcome -->|No| Count[Increment failure count]
+    
+    Count --> Threshold{Threshold<br/>exceeded?}
+    Threshold -->|Yes| Open[Open circuit<br/>Start timer]
+    Threshold -->|No| Attempt
+    
+    Open --> Timer{Timer<br/>expired?}
+    Timer -->|Yes| HalfOpen[Half-open state<br/>Allow test requests]
+    Timer -->|No| Open
+    
+    Test --> TestResult{Success?}
+    TestResult -->|Yes| Close[Close circuit<br/>Resume normal]
+    TestResult -->|No| Open
+    
+    MaxRetries --> DLQ
+    DLQ --> Alert[Alert on-call<br/>Monitor DLQ depth]
+    Alert --> Manual[Manual Investigation<br/>Fix & Replay]
+    
+    style Trans fill:#fff4e1
+    style Perm fill:#ffe1e1
+    style Sys fill:#ffcccc
+    style DLQ fill:#ffe1e1
+    style Complete fill:#e7f5e1
+    style CB fill:#e1f5ff

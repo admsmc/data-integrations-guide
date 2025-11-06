@@ -1,0 +1,36 @@
+flowchart TB
+    subgraph ET["Event Time"]
+        E1[Event A<br/>12:00] --> E2[Event B<br/>12:01]
+        E2 --> E3[Event C<br/>12:02]
+        E3 --> E4[Event D<br/>12:04]
+        E5[Late Event<br/>12:01 arrives at 12:07]
+    end
+    
+    subgraph PT["Processing Time"]
+        P1[Receive A<br/>12:00] --> P2[Receive B<br/>12:02]
+        P2 --> P3[Receive C<br/>12:03]
+        P3 --> WM1[Watermark: 12:00<br/>at 12:03]
+        WM1 --> P4[Receive D<br/>12:05]
+        P4 --> WM2[Watermark: 12:03<br/>at 12:06]
+        WM2 --> P5[Late Event Arrives<br/>12:07]
+    end
+    
+    subgraph Windows["Windowing"]
+        W1[Window 12:00-12:03<br/>Events: A, B, C]
+        W2[Window 12:03-12:06<br/>Events: D]
+    end
+    
+    subgraph Actions["Actions"]
+        Act1[Emit Window 1<br/>at 12:06 after watermark]
+        Act2[Late Event Policy<br/>Update or discard?]
+    end
+    
+    WM1 --> W1
+    WM2 --> Act1
+    P5 --> Act2
+    
+    style E5 fill:#ffe1e1
+    style P5 fill:#ffe1e1
+    style Act2 fill:#ffe1e1
+    style WM1 fill:#e1f5ff
+    style WM2 fill:#e1f5ff

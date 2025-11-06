@@ -1,0 +1,19 @@
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant S as API Server
+  Note over C,S: Initial fetch with ETag
+  C->>S: GET /resource (no If-None-Match)
+  S-->>C: 200 OK + ETag: "abc123" + Body
+  Note over C: Cache ETag + body
+  Note over C,S: Conditional GET
+  C->>S: GET /resource (If-None-Match: "abc123")
+  alt unchanged
+    S-->>C: 304 Not Modified (no body)
+  else changed
+    S-->>C: 200 OK + ETag: "def456" + Body
+  end
+  Note over C,S: Backoff on overload
+  C->>S: GET /resource (If-None-Match: "def456")
+  S-->>C: 503 Service Unavailable + Retry-After: 5
+  C-->>C: Exponential backoff, respect Retry-After

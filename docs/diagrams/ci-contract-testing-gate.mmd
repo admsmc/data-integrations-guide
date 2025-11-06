@@ -1,0 +1,13 @@
+flowchart LR
+  Dev[Dev submits PR] --> CI[CI Pipeline]
+  CI --> Schema[Schema compat check (backward/full)]
+  CI --> ProdTests[Producer tests]
+  CI --> ConsTests[Consumer-driven contract tests]
+  CI --> DataDiff[Data diff / sample checks]
+  Schema --> Gate{Gate}
+  ProdTests --> Gate
+  ConsTests --> Gate
+  DataDiff --> Gate
+  Gate -- pass --> Deploy[Promote to env]
+  Gate -- fail --> Feedback[Fail PR with diagnostics]
+  note right of ConsTests: Verify downstream expectations<br/>before deploy

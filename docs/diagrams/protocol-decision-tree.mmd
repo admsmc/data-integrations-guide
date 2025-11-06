@@ -1,0 +1,49 @@
+flowchart TD
+    Start([Choose Protocol]) --> Type{What type of<br/>integration?}
+    
+    Type -->|Human-facing API| API[HTTP/REST or GraphQL]
+    Type -->|Real-time streaming| Stream{Telemetry volume<br/>& architecture}
+    Type -->|Batch files| Files{Partner<br/>requirements}
+    Type -->|Internal services| Internal{RPC or<br/>messaging?}
+    Type -->|Device/IoT| Device{Device<br/>constraints}
+    
+    Stream -->|High volume,<br/>multi-subscriber| Kafka[Kafka Protocol<br/>Kafka/Redpanda/Event Hubs]
+    Stream -->|Change data| CDC[Kafka + Debezium<br/>for CDC]
+    Stream -->|Lightweight| NATS[NATS / JetStream]
+    Stream -->|Message routing| AMQP[AMQP<br/>RabbitMQ/Service Bus]
+    
+    Files -->|Legacy/secure| SFTP[SFTP with<br/>PGP encryption]
+    Files -->|EDI documents| AS2[AS2 with<br/>signed MDN]
+    Files -->|Modern cloud| HTTP[HTTPS + signed URLs<br/>S3/ADLS/GCS]
+    
+    Internal -->|RPC| gRPC[gRPC<br/>Protobuf + HTTP/2]
+    Internal -->|Async commands| Queue[Message Queue<br/>AMQP/Kafka]
+    Internal -->|Low latency| Direct[Direct HTTP/2<br/>with mTLS]
+    
+    Device -->|Constrained| MQTT[MQTT 3.1.1/5.0<br/>QoS 0/1/2]
+    Device -->|Industrial OT| OPC[OPC UA<br/>Secure channels]
+    Device -->|Very constrained| CoAP[CoAP over UDP/DTLS]
+    Device -->|Bridge to cloud| Bridge[MQTT → Kafka gateway]
+    
+    API --> REST{Query<br/>flexibility?}
+    REST -->|Simple CRUD| RESTful[RESTful HTTP<br/>JSON/HAL]
+    REST -->|Complex queries| GraphQL[GraphQL<br/>Single endpoint]
+    
+    subgraph Security["Security Requirements"]
+        S1[Always: TLS/DTLS/SSH encryption]
+        S2[Partners: webhook signatures,<br/>mTLS, IP allowlists]
+        S3[Internal: mTLS, workload identity]
+    end
+    
+    subgraph Reliability["Reliability Patterns"]
+        R1[Idempotency keys for APIs]
+        R2[Acknowledgments for queues]
+        R3[Checksums for files]
+        R4[Replay from durable logs]
+    end
+    
+    style Kafka fill:#e1f5ff
+    style SFTP fill:#fff4e1
+    style gRPC fill:#e7f5e1
+    style MQTT fill:#ffe8cc
+    style GraphQL fill:#f0e1ff

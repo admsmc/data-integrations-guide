@@ -1,0 +1,41 @@
+flowchart TB
+    subgraph GET["GET (Safe, Idempotent, Cacheable)"]
+        G1[HEAD: Check metadata] --> G2[GET with If-None-Match: ETag]
+        G2 --> G3{304 Not<br/>Modified?}
+        G3 -->|Yes| G4[Use cached data]
+        G3 -->|No| G5[200: Download new data<br/>Store new ETag]
+    end
+    
+    subgraph POST["POST (Not Idempotent by default)"]
+        P1[POST with Idempotency-Key] --> P2{Request<br/>succeeds?}
+        P2 -->|Yes| P3[201: Created<br/>Location header]
+        P2 -->|Network error| P4[Retry with same<br/>Idempotency-Key]
+        P4 --> P5[Server returns cached<br/>response if duplicate]
+    end
+    
+    subgraph PUT["PUT (Idempotent)"]
+        U1[PUT with full resource] --> U2[If-Match: ETag<br/>for optimistic lock]
+        U2 --> U3{ETag<br/>matches?}
+        U3 -->|Yes| U4[200/204: Updated]
+        U3 -->|No| U5[412: Precondition Failed<br/>Refetch and retry]
+    end
+    
+    subgraph PATCH["PATCH (Conditional Idempotency)"]
+        PA1[PATCH with partial update] --> PA2[If-Match: ETag]
+        PA2 --> PA3[Design operations<br/>to be idempotent]
+    end
+    
+    subgraph DELETE["DELETE (Idempotent)"]
+        D1[DELETE resource] --> D2{Exists?}
+        D2 -->|Yes| D3[204: Deleted]
+        D2 -->|No| D4[204: Already deleted<br/>Safe to retry]
+    end
+    
+    Retry[Retry Logic] --> Rate{429/503<br/>response?}
+    Rate -->|Yes| Back[Exponential backoff<br/>Respect Retry-After]
+    Rate -->|No| Fail[Permanent failure]
+    
+    style G3 fill:#e1f5ff
+    style P2 fill:#ffe1e1
+    style U3 fill:#fff4e1
+    style Rate fill:#ffe1e1

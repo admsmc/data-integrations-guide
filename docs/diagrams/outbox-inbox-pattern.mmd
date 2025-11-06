@@ -1,0 +1,40 @@
+sequenceDiagram
+    participant App as Application Service
+    participant DB as Database
+    participant Outbox as Outbox Table
+    participant Relay as Relay Service
+    participant Kafka
+    participant Consumer
+    participant Inbox as Inbox Table
+    participant Target as Target Service
+    
+    Note over App,Outbox: Phase 1: Transactional Write
+    App->>DB: BEGIN TRANSACTION
+    App->>DB: INSERT business record
+    App->>Outbox: INSERT event to outbox<br/>(event_id, payload, created_at)
+    App->>DB: COMMIT
+    
+    Note over Relay,Kafka: Phase 2: Async Relay
+    loop Poll outbox
+        Relay->>Outbox: SELECT * FROM outbox<br/>WHERE published_at IS NULL<br/>ORDER BY created_at LIMIT 100
+        Outbox-->>Relay: Unpublished events
+        Relay->>Kafka: Publish events
+        Kafka-->>Relay: Ack
+        Relay->>Outbox: UPDATE published_at = now()<br/>WHERE event_id IN (...)
+    end
+    
+    Note over Consumer,Target: Phase 3: Inbox Pattern
+    Consumer->>Kafka: Poll events
+    Kafka-->>Consumer: Event batch
+    Consumer->>Inbox: BEGIN TRANSACTION
+    Consumer->>Inbox: INSERT INTO inbox<br/>(event_id, payload)<br/>ON CONFLICT DO NOTHING
+    Consumer->>Inbox: Check rows affected
+    alt Event not duplicate
+        Consumer->>Target: Process event
+        Consumer->>Inbox: UPDATE processed_at
+    else Duplicate (idempotency)
+        Consumer->>Inbox: Skip processing
+    end
+    Consumer->>Inbox: COMMIT
+    Consumer->>Kafka: Commit offset
+    

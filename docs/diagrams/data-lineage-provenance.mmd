@@ -1,0 +1,63 @@
+flowchart LR
+    subgraph Sources["Data Sources"]
+        API[REST API<br/>api.partner.com/v2/customers]
+        DB[Database<br/>postgres://prod/crm]
+        File[SFTP File<br/>customers_2025-11-06.csv]
+    end
+    
+    subgraph Ingestion["Ingestion Layer"]
+        API --> E1[Extract Job<br/>job_id: 12345<br/>run_id: abc-123<br/>version: v2.3.1]
+        DB --> E2[CDC Connector<br/>job_id: 12346<br/>connector_version: 2.1.0]
+        File --> E3[File Processor<br/>job_id: 12347<br/>checksum: sha256-xyz]
+    end
+    
+    subgraph Bronze["Bronze Layer (Raw)"]
+        E1 --> B1[raw.api_customers<br/>ingest_time: 2025-11-06T10:00:00Z<br/>source_id: partner_api<br/>job_id: 12345<br/>schema_version: 2.0]
+        
+        E2 --> B2[raw.db_customers<br/>cdc_lsn: 1000-1500<br/>source_id: crm_db<br/>job_id: 12346]
+        
+        E3 --> B3[raw.file_customers<br/>file_name: customers_2025-11-06.csv<br/>checksum: sha256-xyz<br/>job_id: 12347<br/>row_count: 10250]
+    end
+    
+    subgraph Silver["Silver Layer (Cleaned)"]
+        B1 --> S1[Transform Job<br/>job_id: 20001<br/>dbt_model: customers_cleaned<br/>git_sha: a1b2c3d<br/>dbt_version: 1.7.0]
+        B2 --> S1
+        B3 --> S1
+        
+        S1 --> Silver1[silver.customers<br/>deduplicated<br/>normalized UTC timestamps<br/>PII tokenized<br/>upstream_jobs: 12345,12346,12347<br/>transform_version: v3.1.0]
+    end
+    
+    subgraph Gold["Gold Layer (Business)"]
+        Silver1 --> G1[Aggregate Job<br/>job_id: 30001<br/>dbt_model: customer_lifetime_value<br/>git_sha: a1b2c3d]
+        
+        G1 --> Gold1[gold.customer_ltv<br/>aggregation_window: 2025-11-01 to 2025-11-06<br/>upstream_job: 20001<br/>quality_checks: passed<br/>record_count: 8500]
+    end
+    
+    subgraph Catalog["Data Catalog & Lineage"]
+        Gold1 --> Lineage[Lineage Graph<br/>DataHub/Purview/OpenLineage]
+        Silver1 --> Lineage
+        B1 --> Lineage
+        B2 --> Lineage
+        B3 --> Lineage
+        
+        Lineage --> Query[Query lineage:<br/>• Upstream sources<br/>• Transform versions<br/>• Data freshness<br/>• Quality status]
+    end
+    
+    subgraph Metadata["Provenance Metadata"]
+        Meta[Every record includes:<br/>• _ingested_at<br/>• _source_job_id<br/>• _source_system<br/>• _checksum / _fingerprint<br/>• _schema_version<br/>• _transform_version]
+    end
+    
+    subgraph Observability["Observability"]
+        Metrics[Metrics:<br/>• Freshness: max age per table<br/>• Volume: record count per run<br/>• Quality: validation pass rate<br/>• Lineage depth: hop count]
+        
+        Alerts[Alerts:<br/>• Freshness SLO breach<br/>• Volume anomaly<br/>• Quality gate failure<br/>• Missing upstream dependency]
+    end
+    
+    Query --> Metrics
+    Lineage --> Alerts
+    
+    style B1 fill:#ffe8cc
+    style Silver1 fill:#e1f5ff
+    style Gold1 fill:#fff4cc
+    style Lineage fill:#e7f5e1
+    style Meta fill:#f0e1ff

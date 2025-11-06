@@ -1,0 +1,46 @@
+flowchart LR
+    subgraph Warehouse["Data Warehouse / Lakehouse"]
+        Gold[Gold Layer<br/>Business Marts] --> Query[SQL SELECT<br/>Windowed query with<br/>updated_at filter]
+        Query --> Filter[Apply SLA window:<br/>WHERE updated_at >= watermark<br/>AND updated_at < now - 5min]
+    end
+    
+    subgraph Sync["Sync Orchestrator"]
+        Filter --> Load[Load cursor/<br/>high-water mark]
+        Load --> Page[Paginate results<br/>LIMIT/OFFSET or cursor]
+        Page --> Transform[Transform to<br/>destination schema]
+        Transform --> Batch[Batch records<br/>100-1000 per API call]
+    end
+    
+    subgraph Destination["Operational System API"]
+        Batch --> Validate[Validate payload<br/>against API schema]
+        Validate --> Idem[Add Idempotency-Key<br/>per record ID]
+        Idem --> Post[POST/PUT to API<br/>with rate limiting]
+        Post --> Resp{Response}
+        Resp -->|2xx| Success[Record success<br/>Update watermark]
+        Resp -->|429| RateLimit[Backoff & retry<br/>Respect Retry-After]
+        Resp -->|4xx| PermError[Permanent error<br/>Log to DLQ]
+        Resp -->|5xx| TempError[Transient error<br/>Retry with backoff]
+    end
+    
+    subgraph State["State Management"]
+        Success --> SaveWM[Save watermark:<br/>MAX updated_at synced]
+        SaveWM --> Next{More<br/>pages?}
+        Next -->|Yes| Page
+        Next -->|No| Complete[Sync complete<br/>Log metrics]
+    end
+    
+    subgraph Monitor["Monitoring"]
+        Complete --> Metrics[Emit metrics:<br/>• Records synced<br/>• Latency<br/>• Error rate<br/>• Watermark lag]
+        PermError --> AlertDLQ[Alert on DLQ depth]
+        TempError --> Retry[Retry logic]
+        Retry --> Post
+    end
+    
+    Complete --> Schedule[Schedule next run<br/>5-60 min interval]
+    Schedule --> Load
+    
+    style Query fill:#e1f5ff
+    style Idem fill:#e7f5e1
+    style Success fill:#e7f5e1
+    style PermError fill:#ffe1e1
+    style SaveWM fill:#fff4e1

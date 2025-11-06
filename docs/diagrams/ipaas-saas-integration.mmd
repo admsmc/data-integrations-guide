@@ -1,0 +1,68 @@
+flowchart LR
+    subgraph Source["Source SaaS (e.g., Salesforce)"]
+        Event[Business Event<br/>New Opportunity Created]
+        Webhook[Outbound Webhook<br/>or Polling Connector]
+    end
+    
+    subgraph iPaaS["iPaaS Platform (MuleSoft/Workato/Logic Apps)"]
+        Event --> Webhook
+        Webhook --> Trigger[Trigger: Receive Event]
+        
+        Trigger --> Validate[Validate Payload<br/>Schema check]
+        Validate --> Valid{Valid?}
+        Valid -->|No| Error[Error Handler<br/>Log to error queue<br/>Retry or notify]
+        Valid -->|Yes| Enrich[Enrich Data<br/>Lookup customer from<br/>another system]
+        
+        Enrich --> Transform[Transform<br/>Map fields:<br/>source_schema → dest_schema]
+        
+        Transform --> Split{Fan-out<br/>required?}
+        Split -->|Yes| Multi[Multiple destinations]
+        Split -->|No| Single[Single destination]
+        
+        Multi --> D1[Destination 1]
+        Multi --> D2[Destination 2]
+        Single --> D1
+        
+        D1[Transform for Dest 1] --> Batch1[Batch if needed<br/>100 records/call]
+        Batch1 --> Retry1[Built-in Retry<br/>Exponential backoff]
+        
+        D2[Transform for Dest 2] --> API2[Call API 2]
+    end
+    
+    subgraph Dest1["Destination SaaS (e.g., NetSuite)"]
+        Retry1 --> Auth1[OAuth Token Refresh<br/>Managed by platform]
+        Auth1 --> Call1[POST /api/v1/orders]
+        Call1 --> Resp1{Response}
+        Resp1 -->|2xx| Success1[Log success<br/>Emit metrics]
+        Resp1 -->|4xx/5xx| RetryDest1[Retry or DLQ]
+    end
+    
+    subgraph Dest2["Destination (e.g., Slack)"]
+        API2 --> Post2[POST webhook<br/>Notify team]
+    end
+    
+    subgraph Monitoring["iPaaS Monitoring"]
+        Success1 --> Metrics[Platform Metrics:<br/>• Run count<br/>• Success rate<br/>• Latency<br/>• Error breakdown]
+        
+        Error --> Alert[Alert on:<br/>• High error rate<br/>• SLA breach<br/>• Auth failures]
+        
+        Metrics --> Dashboard[Built-in Dashboard<br/>Visual flow editor<br/>Logs & traces]
+    end
+    
+    subgraph Config["Configuration Management"]
+        Connectors[Pre-built Connectors<br/>100s of SaaS apps]
+        Mapping[Visual Field Mapping<br/>Drag-and-drop]
+        Schedule[Scheduler<br/>Polling intervals<br/>Webhook registration]
+    end
+    
+    subgraph Limitations["iPaaS Trade-offs"]
+        Pros[✓ Fast time-to-value<br/>✓ Managed auth & retries<br/>✓ Visual development<br/>✓ Built-in monitoring]
+        
+        Cons[✗ Vendor lock-in<br/>✗ Per-action pricing<br/>✗ Limited custom logic<br/>✗ Source control friction]
+    end
+    
+    style Validate fill:#e1f5ff
+    style Valid fill:#fff4e1
+    style Error fill:#ffe1e1
+    style Success1 fill:#e7f5e1
+    style Dashboard fill:#f0e1ff

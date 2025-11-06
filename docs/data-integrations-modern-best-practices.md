@@ -699,6 +699,615 @@ Mermaid: Bank events + statements
 - Idempotency: provider event IDs + type; deterministically derive transfer IDs; dedupe on replay.
 - Reconciliation: sum captured - refunds - fees = net payout; match by payout ID/date.
 
+#### Real-time payment processor integration: Stripe example
+
+This section demonstrates a complete, production-ready integration with Stripe covering payment intent creation, webhook handling, idempotency, reconciliation, and data pipeline integration.
+
+![Stripe payment processor integration flow](images/stripe-payment-integration.png)
+
+##### Integration architecture
+
+**Key components**
+1. **Frontend (Stripe.js)**: PCI-compliant card collection; card data never touches your backend.
+2. **Backend API**: Creates PaymentIntents, stores orders, initiates refunds.
+3. **Webhook handler**: Processes asynchronous events from Stripe with signature verification and idempotency.
+4. **Database**: Stores orders, payment intents, webhook events; transactional integrity.
+5. **Event stream (Kafka)**: Publishes payment events for downstream analytics, notifications, fraud detection.
+6. **Data warehouse**: Aggregates payment data for reporting, reconciliation, and business intelligence.
+
+**Flow overview**
+1. Customer initiates checkout → Backend creates PaymentIntent in Stripe
+2. Frontend collects card details via Stripe.js (PCI compliant)
+3. Stripe processes payment and sends webhook events
+4. Webhook handler updates order status, publishes to Kafka
+5. Daily batch reconciliation matches transactions to payouts
+
+##### TypeScript: Complete Stripe integration
+
+**Backend API: Create PaymentIntent**
+
+```typescript
+import Stripe from "stripe";
+import { z } from "zod";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16",
+});
+
+const CheckoutRequest = z.object({
+  amount: z.number().positive(),
+  currency: z.string().default("usd"),
+  orderId: z.string().uuid(),
+  customerId: z.string().uuid(),
+  metadata: z.record(z.string()).optional(),
+});
+
+type CheckoutRequest = z.infer<typeof CheckoutRequest>;
+
+export async function createPaymentIntent(
+  req: CheckoutRequest
+): Promise<{ clientSecret: string; paymentIntentId: string }> {
+  // Validate request
+  const validated = CheckoutRequest.parse(req);
+
+  // Begin database transaction
+  await db.transaction(async (tx) => {
+    // Create order record
+    await tx.query(
+      `INSERT INTO orders (id, customer_id, amount, currency, status, created_at)
+       VALUES ($1, $2, $3, $4, 'pending', NOW())`,
+      [validated.orderId, validated.customerId, validated.amount, validated.currency]
+    );
+
+    // Create PaymentIntent in Stripe
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: validated.amount, // amount in cents
+      currency: validated.currency,
+      metadata: {
+        order_id: validated.orderId,
+        customer_id: validated.customerId,
+        ...validated.metadata,
+      },
+      // Enable automatic payment methods
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    // Store PaymentIntent ID for reconciliation
+    await tx.query(
+      `UPDATE orders
+       SET stripe_payment_intent_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [paymentIntent.id, validated.orderId]
+    );
+
+    return {
+      clientSecret: paymentIntent.client_secret!,
+      paymentIntentId: paymentIntent.id,
+    };
+  });
+}
+```
+
+**Webhook handler: Process Stripe events**
+
+```typescript
+import { Request, Response } from "express";
+import Stripe from "stripe";
+import { Producer } from "kafkajs";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16",
+});
+
+const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET!;
+
+interface WebhookEvent {
+  id: string;
+  type: string;
+  data: any;
+  created: number;
+}
+
+export async function handleStripeWebhook(
+  req: Request,
+  res: Response,
+  kafkaProducer: Producer
+) {
+  const signature = req.headers["stripe-signature"] as string;
+
+  let event: Stripe.Event;
+
+  try {
+    // Verify webhook signature (critical security step)
+    event = stripe.webhooks.constructEvent(
+      req.body, // raw body, not parsed JSON
+      signature,
+      WEBHOOK_SECRET
+    );
+  } catch (err: any) {
+    console.error("Webhook signature verification failed", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Process event with idempotency
+  await db.transaction(async (tx) => {
+    // Idempotency check: insert event ID with ON CONFLICT DO NOTHING
+    const result = await tx.query(
+      `INSERT INTO webhook_events (id, type, data, created_at, processed_at)
+       VALUES ($1, $2, $3, to_timestamp($4), NULL)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id`,
+      [event.id, event.type, JSON.stringify(event.data), event.created]
+    );
+
+    // If result is empty, event was already processed (duplicate)
+    if (result.rows.length === 0) {
+      console.log(`Duplicate event ${event.id}, skipping`);
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    // Process event based on type
+    switch (event.type) {
+      case "payment_intent.succeeded":
+        await handlePaymentIntentSucceeded(tx, event, kafkaProducer);
+        break;
+
+      case "payment_intent.payment_failed":
+        await handlePaymentIntentFailed(tx, event, kafkaProducer);
+        break;
+
+      case "charge.refunded":
+        await handleChargeRefunded(tx, event, kafkaProducer);
+        break;
+
+      case "charge.dispute.created":
+        await handleDisputeCreated(tx, event, kafkaProducer);
+        break;
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+
+    // Mark event as processed
+    await tx.query(
+      `UPDATE webhook_events SET processed_at = NOW() WHERE id = $1`,
+      [event.id]
+    );
+  });
+
+  res.status(200).json({ received: true });
+}
+
+async function handlePaymentIntentSucceeded(
+  tx: any,
+  event: Stripe.Event,
+  kafkaProducer: Producer
+) {
+  const paymentIntent = event.data.object as Stripe.PaymentIntent;
+  const orderId = paymentIntent.metadata.order_id;
+
+  if (!orderId) {
+    console.error("No order_id in PaymentIntent metadata");
+    return;
+  }
+
+  // Update order status
+  await tx.query(
+    `UPDATE orders
+     SET status = 'paid',
+         paid_at = to_timestamp($1),
+         stripe_charge_id = $2,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [paymentIntent.created, paymentIntent.latest_charge, orderId]
+  );
+
+  // Publish event to Kafka for downstream processing
+  await kafkaProducer.send({
+    topic: "payment.completed",
+    messages: [
+      {
+        key: orderId,
+        value: JSON.stringify({
+          order_id: orderId,
+          payment_intent_id: paymentIntent.id,
+          amount: paymentIntent.amount,
+          currency: paymentIntent.currency,
+          customer_id: paymentIntent.metadata.customer_id,
+          paid_at: new Date(paymentIntent.created * 1000).toISOString(),
+          event_id: event.id,
+        }),
+        headers: {
+          event_type: "payment_completed",
+          source: "stripe",
+        },
+      },
+    ],
+  });
+
+  console.log(`Payment succeeded for order ${orderId}`);
+}
+
+async function handlePaymentIntentFailed(
+  tx: any,
+  event: Stripe.Event,
+  kafkaProducer: Producer
+) {
+  const paymentIntent = event.data.object as Stripe.PaymentIntent;
+  const orderId = paymentIntent.metadata.order_id;
+
+  if (!orderId) return;
+
+  // Update order with failure reason
+  await tx.query(
+    `UPDATE orders
+     SET status = 'payment_failed',
+         failure_code = $1,
+         failure_message = $2,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [
+      paymentIntent.last_payment_error?.code,
+      paymentIntent.last_payment_error?.message,
+      orderId,
+    ]
+  );
+
+  // Publish failure event
+  await kafkaProducer.send({
+    topic: "payment.failed",
+    messages: [
+      {
+        key: orderId,
+        value: JSON.stringify({
+          order_id: orderId,
+          payment_intent_id: paymentIntent.id,
+          failure_code: paymentIntent.last_payment_error?.code,
+          failure_message: paymentIntent.last_payment_error?.message,
+          event_id: event.id,
+        }),
+      },
+    ],
+  });
+}
+
+async function handleChargeRefunded(
+  tx: any,
+  event: Stripe.Event,
+  kafkaProducer: Producer
+) {
+  const charge = event.data.object as Stripe.Charge;
+  const paymentIntentId = charge.payment_intent as string;
+
+  // Find order by payment intent
+  const order = await tx.query(
+    `SELECT id, amount FROM orders WHERE stripe_payment_intent_id = $1`,
+    [paymentIntentId]
+  );
+
+  if (order.rows.length === 0) {
+    console.error(`Order not found for PaymentIntent ${paymentIntentId}`);
+    return;
+  }
+
+  const orderId = order.rows[0].id;
+
+  // Update order status
+  await tx.query(
+    `UPDATE orders
+     SET status = 'refunded',
+         refunded_at = to_timestamp($1),
+         refund_amount = $2,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [charge.created, charge.amount_refunded, orderId]
+  );
+
+  // Publish refund event
+  await kafkaProducer.send({
+    topic: "payment.refunded",
+    messages: [
+      {
+        key: orderId,
+        value: JSON.stringify({
+          order_id: orderId,
+          charge_id: charge.id,
+          refund_amount: charge.amount_refunded,
+          refunded_at: new Date(charge.created * 1000).toISOString(),
+          event_id: event.id,
+        }),
+      },
+    ],
+  });
+}
+
+async function handleDisputeCreated(
+  tx: any,
+  event: Stripe.Event,
+  kafkaProducer: Producer
+) {
+  const dispute = event.data.object as Stripe.Dispute;
+  const chargeId = dispute.charge as string;
+
+  // Find order by charge ID
+  const order = await tx.query(
+    `SELECT id FROM orders WHERE stripe_charge_id = $1`,
+    [chargeId]
+  );
+
+  if (order.rows.length === 0) return;
+
+  const orderId = order.rows[0].id;
+
+  // Record dispute
+  await tx.query(
+    `INSERT INTO disputes (id, order_id, charge_id, amount, reason, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7))`,
+    [
+      dispute.id,
+      orderId,
+      chargeId,
+      dispute.amount,
+      dispute.reason,
+      dispute.status,
+      dispute.created,
+    ]
+  );
+
+  // Alert operations team
+  await kafkaProducer.send({
+    topic: "payment.dispute.created",
+    messages: [
+      {
+        key: orderId,
+        value: JSON.stringify({
+          order_id: orderId,
+          dispute_id: dispute.id,
+          amount: dispute.amount,
+          reason: dispute.reason,
+          event_id: event.id,
+        }),
+        headers: {
+          priority: "high", // Alert operations
+        },
+      },
+    ],
+  });
+}
+```
+
+##### Python: Reconciliation and batch processing
+
+**Daily reconciliation job**
+
+```python
+import stripe
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import List, Dict
+import psycopg2
+
+stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+
+def reconcile_daily_payouts(date: datetime):
+    """
+    Reconcile Stripe transactions for a given date.
+    Matches internal order records against Stripe balance transactions.
+    """
+    start_of_day = int(date.replace(hour=0, minute=0, second=0).timestamp())
+    end_of_day = int(date.replace(hour=23, minute=59, second=59).timestamp())
+    
+    # Fetch all balance transactions from Stripe
+    transactions = []
+    has_more = True
+    starting_after = None
+    
+    while has_more:
+        params = {
+            "created": {"gte": start_of_day, "lte": end_of_day},
+            "limit": 100,
+        }
+        if starting_after:
+            params["starting_after"] = starting_after
+        
+        result = stripe.BalanceTransaction.list(**params)
+        transactions.extend(result.data)
+        has_more = result.has_more
+        starting_after = result.data[-1].id if result.data else None
+    
+    # Group transactions by type
+    captures = [t for t in transactions if t.type == "charge"]
+    refunds = [t for t in transactions if t.type == "refund"]
+    fees = sum(t.fee for t in transactions)
+    
+    # Calculate net payout
+    gross_captures = sum(t.amount for t in captures)
+    gross_refunds = sum(abs(t.amount) for t in refunds)
+    net_payout = gross_captures - gross_refunds - fees
+    
+    # Store reconciliation report
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        """
+        INSERT INTO reconciliation_reports
+        (date, gross_captures, gross_refunds, fees, net_payout, 
+         transaction_count, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (date) DO UPDATE SET
+            gross_captures = EXCLUDED.gross_captures,
+            gross_refunds = EXCLUDED.gross_refunds,
+            fees = EXCLUDED.fees,
+            net_payout = EXCLUDED.net_payout,
+            transaction_count = EXCLUDED.transaction_count,
+            updated_at = NOW()
+        """,
+        (
+            date.date(),
+            gross_captures,
+            gross_refunds,
+            fees,
+            net_payout,
+            len(transactions),
+        ),
+    )
+    
+    # Check for discrepancies
+    cursor.execute(
+        """
+        SELECT
+            COUNT(*) as order_count,
+            SUM(amount) as order_total
+        FROM orders
+        WHERE status = 'paid'
+        AND DATE(paid_at) = %s
+        """,
+        (date.date(),),
+    )
+    
+    order_count, order_total = cursor.fetchone()
+    
+    # Calculate discrepancy
+    discrepancy = abs(order_total - gross_captures) if order_total else gross_captures
+    
+    if discrepancy > 100:  # More than $1 difference
+        print(f"⚠️ Reconciliation discrepancy detected: ${discrepancy / 100:.2f}")
+        # Alert finance team
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    print(f"✓ Reconciliation complete for {date.date()}")
+    print(f"  Captures: ${gross_captures / 100:.2f}")
+    print(f"  Refunds: ${gross_refunds / 100:.2f}")
+    print(f"  Fees: ${fees / 100:.2f}")
+    print(f"  Net payout: ${net_payout / 100:.2f}")
+    print(f"  Discrepancy: ${discrepancy / 100:.2f}")
+
+if __name__ == "__main__":
+    yesterday = datetime.utcnow() - timedelta(days=1)
+    reconcile_daily_payouts(yesterday)
+```
+
+**Batch export to data warehouse**
+
+```python
+from pydantic import BaseModel
+from datetime import datetime
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+class PaymentEvent(BaseModel):
+    event_id: str
+    order_id: str
+    payment_intent_id: str
+    amount: int
+    currency: str
+    status: str
+    paid_at: datetime
+    customer_id: str
+    metadata: dict
+
+def export_payments_to_warehouse(date: datetime):
+    """
+    Extract payment data and export to data warehouse (Parquet format).
+    """
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    
+    # Query payments for the date
+    query = """
+    SELECT
+        o.id as order_id,
+        o.stripe_payment_intent_id as payment_intent_id,
+        o.amount,
+        o.currency,
+        o.status,
+        o.paid_at,
+        o.customer_id,
+        o.created_at,
+        we.id as event_id,
+        we.type as event_type,
+        we.data as event_data
+    FROM orders o
+    LEFT JOIN webhook_events we ON we.data->>'object'->>'id' = o.stripe_payment_intent_id
+    WHERE DATE(o.paid_at) = %s
+    AND o.status IN ('paid', 'refunded')
+    ORDER BY o.paid_at
+    """
+    
+    df = pd.read_sql(query, conn, params=(date.date(),))
+    conn.close()
+    
+    # Transform to warehouse schema
+    df["payment_date"] = pd.to_datetime(df["paid_at"]).dt.date
+    df["payment_hour"] = pd.to_datetime(df["paid_at"]).dt.hour
+    df["amount_usd"] = df["amount"] / 100  # Convert cents to dollars
+    
+    # Write to Parquet partitioned by date
+    output_path = f"s3://data-warehouse/payments/date={date.date()}/payments.parquet"
+    
+    table = pa.Table.from_pandas(df)
+    pq.write_to_dataset(
+        table,
+        root_path="s3://data-warehouse/payments",
+        partition_cols=["payment_date"],
+        compression="snappy",
+    )
+    
+    print(f"✓ Exported {len(df)} payments to {output_path}")
+
+if __name__ == "__main__":
+    yesterday = datetime.utcnow() - timedelta(days=1)
+    export_payments_to_warehouse(yesterday)
+```
+
+##### Operational best practices
+
+**Security**
+- Never log card details or client secrets
+- Store Stripe secret key and webhook secret in secure vault (never in code)
+- Verify webhook signatures on every request (prevents replay attacks)
+- Use HTTPS for all endpoints
+- Implement rate limiting on webhook endpoints
+
+**Idempotency**
+- Use Stripe event IDs as idempotency keys in `webhook_events` table
+- Use `ON CONFLICT DO NOTHING` for atomic duplicate detection
+- Store PaymentIntent ID on orders for reconciliation
+- Never rely on webhooks alone; poll Stripe API as backup
+
+**Monitoring and alerts**
+- Alert on webhook processing failures
+- Monitor reconciliation discrepancies > $10
+- Track webhook delivery latency (Stripe → your endpoint)
+- Alert on dispute creation (high priority)
+- Monitor failed payment rates and decline codes
+
+**Testing**
+- Use Stripe test mode with test card numbers (4242 4242 4242 4242)
+- Test webhook handling with Stripe CLI: `stripe listen --forward-to localhost:3000/webhooks/stripe`
+- Simulate failures with test cards (4000 0000 0000 0002 for card_declined)
+- Test idempotency by replaying webhook events
+- Contract tests: validate webhook event schemas
+
+**Reconciliation**
+- Run daily reconciliation batch job
+- Match Stripe balance transactions to internal orders
+- Check for missing webhooks (poll Stripe API for events)
+- Alert finance team on discrepancies
+- Store reconciliation reports with audit trail
+
+**Data pipeline**
+- Publish payment events to Kafka for real-time analytics
+- Consume events for fraud detection, notifications, reporting
+- Export daily batches to data warehouse (Parquet/Iceberg)
+- Maintain lineage: order_id → payment_intent_id → event_id
+- Partition warehouse data by payment_date for efficient queries
+
 ### ERP/Finance/CRM (master data and transactions)
 - Master data sync
   - Parties/customers/vendors/products; use CDC where possible or API pagination by updated_at; cursors for large sets.
@@ -1484,6 +2093,8 @@ Warehouse access control patterns
 - Column-level security/masking: restrict PII columns; dynamic data masking for dev/test; tokenize sensitive identifiers.
 - Per-tenant keys: envelope encrypt columns with per-tenant keys (BYOK/HYOK where required); rotate and audit.
 - Auditing: enable object-level logging; alert on privilege escalations and policy changes; least-privilege review cadence.
+
+![PII handling and masking patterns](images/pii-handling-masking.png)
 
 ### Integration security best practices (deep dive)
 

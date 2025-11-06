@@ -1,0 +1,18 @@
+flowchart LR
+  subgraph Control
+    GetWM[Get last_watermark]
+    Query[Query source with WHERE updated_at >= last_watermark]
+    Page[Paginate by keyset]
+    Write[Write to landing]
+    Advance[Advance watermark]
+  end
+  Source[(RDBMS/ODBC)]
+  Sink[(Landing/Parquet)]
+
+  GetWM --> Query
+  Source --> Query --> Page --> Write --> Sink
+  Write --> Advance --> GetWM
+
+  Note right of Query: Prefer snapshot isolation
+  Note right of Page: ORDER BY updated_at, id
+  Note right of Advance: Use max(updated_at) of processed batch

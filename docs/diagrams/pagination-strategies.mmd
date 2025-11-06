@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant Client
+    participant API
+    participant Store as Checkpoint Store
+    
+    Client->>API: GET /customers?limit=100
+    API-->>Client: {data: [...], next_cursor: "abc123"}
+    Client->>Store: Save cursor: abc123
+    
+    Client->>API: GET /customers?limit=100&cursor=abc123
+    API-->>Client: {data: [...], next_cursor: "def456"}
+    Client->>Store: Save cursor: def456
+    
+    Note over Client,API: Process crashes here
+    
+    Client->>Store: Resume: load last cursor
+    Store-->>Client: cursor: def456
+    
+    Client->>API: GET /customers?limit=100&cursor=def456
+    API-->>Client: {data: [...], next_cursor: "ghi789"}
+    
+    Client->>API: GET /customers?limit=100&cursor=ghi789
+    API-->>Client: {data: [...], next_cursor: null}
+    
+    Note over Client,API: No more pages - complete

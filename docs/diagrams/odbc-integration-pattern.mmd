@@ -1,0 +1,33 @@
+flowchart TB
+    Start([Integration Job]) --> Config[Load Config<br/>DSN, credentials, query]
+    Config --> Connect[Establish TLS connection<br/>Read-only user]
+    
+    Connect --> HWM[Load high-water mark<br/>last updated_at or max ID]
+    
+    HWM --> Query[Build query with:<br/>• SELECT only needed columns<br/>• WHERE updated_at >= HWM<br/>• ORDER BY id<br/>• Snapshot isolation level]
+    
+    Query --> Page1[Fetch page 1<br/>LIMIT 1000]
+    Page1 --> Process1[Process batch<br/>Transform & validate]
+    Process1 --> Write1[Write to Bronze<br/>with metadata]
+    
+    Write1 --> More{More<br/>rows?}
+    More -->|Yes| Page2[Keyset pagination:<br/>WHERE id > last_id<br/>ORDER BY id LIMIT 1000]
+    Page2 --> Process2[Process batch]
+    Process2 --> Write2[Write to Bronze]
+    Write2 --> More
+    
+    More -->|No| SaveHWM[Save new high-water mark<br/>MAX updated_at from batch]
+    SaveHWM --> Close[Close connection<br/>Connection pool]
+    Close --> End([End])
+    
+    Query --> Error{Connection<br/>or query<br/>error?}
+    Error -->|Yes| Retry[Exponential backoff<br/>Circuit breaker]
+    Retry --> Fail{Max<br/>retries?}
+    Fail -->|Yes| DLQ[Log to DLQ<br/>Alert]
+    Fail -->|No| Query
+    
+    style Connect fill:#e1f5ff
+    style Query fill:#fff4e1
+    style SaveHWM fill:#e7f5e1
+    style Error fill:#ffe1e1
+    style DLQ fill:#ffe1e1
