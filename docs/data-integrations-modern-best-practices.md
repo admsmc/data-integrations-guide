@@ -276,6 +276,35 @@ Choose protocols based on delivery guarantees, latency, payload size, device con
 - HTTP/HTTPS (REST)
   - Ubiquitous request/response APIs; cacheable GETs; pagination; retries with idempotency keys.
   - Use for: CRUD APIs, pull-based integrations, reverse ETL selects via API.
+
+### HTTP method semantics for integrations (quick reference)
+
+Key properties
+- Safe (no side effects): GET, HEAD, OPTIONS
+- Idempotent (same outcome on retry): GET, PUT, DELETE, HEAD, OPTIONS
+- Cacheable: GET, HEAD (responses may be cached)
+
+Method guidance
+- GET (safe, idempotent, cacheable)
+  - Prefer conditional GET (If-None-Match with ETag, or If-Modified-Since) to reduce egress and enable caching.
+  - For large files, consider Range (206) and use HEAD to probe size/checksum/last-modified first.
+- POST (create/commands; not idempotent)
+  - Use Idempotency-Key for safe retries; return 201 + Location for resource URI on create.
+- PUT (replace; idempotent)
+  - Client controls URI; send full representation. Good when client chooses IDs and retries must be safe.
+- PATCH (partial update; idempotency depends on design)
+  - Use preconditions (If-Match with ETag) to avoid lost updates. Keep operations idempotent where possible.
+- DELETE (idempotent)
+  - Safe to retry; often 204 No Content.
+- HEAD (metadata only)
+  - Probe existence/size/last-modified without transferring body.
+- OPTIONS (capabilities)
+  - CORS preflight; respond with Allow and CORS headers.
+
+Preconditions & retries
+- Use ETags and If-Match/If-None-Match to enforce optimistic concurrency and avoid overwrites.
+- Back off on 429/503; respect Retry-After when provided.
+
 - GraphQL over HTTP
   - Flexible queries; single endpoint; schema/typing; watch N+1 patterns and limits.
   - Use for: tailored reads across multiple resources; when server supports persisted queries.
@@ -1488,6 +1517,44 @@ Application layer and inputs
 - Canonicalize file formats (normalize newlines, encodings) to avoid parser evasion.
 - For webhooks, verify signatures (HMAC: hash-based message authentication) and timestamps; replay-protect with idempotency keys.
 - For EDI, verify control numbers and envelopes; require 997/999 acknowledgments.
+
+#### Application-layer protections (XSS, injection, CSRF, SSRF)
+
+- SQL injection
+  - Always use parameterized queries/prepared statements; no string concatenation.
+  - Apply allowlists for columns/operations; avoid dynamic SQL where possible.
+  - Enforce RLS and least-privilege DB roles even for ETL/reverse ETL.
+
+- Cross-site scripting (XSS)
+  - If any UI renders partner data/logs: output-encode HTML, strip tags, and sanitize rich text.
+  - Set CSP (e.g., default-src 'self'; object-src 'none'; frame-ancestors 'none'); avoid inline scripts (nonce/hash).
+  - Cookies: HttpOnly, Secure, SameSite=Strict/Lax.
+
+- CSRF
+  - Use anti-CSRF tokens or SameSite cookies for state-changing endpoints.
+  - Validate Origin/Referer on CORS-protected routes.
+
+- SSRF
+  - Egress allowlists for HTTP clients; block metadata endpoints; limit protocols to http/https; disable redirects by default.
+  - Treat URLs in payloads as untrusted; fetch via controlled proxies when possible.
+
+- CSV/Excel formula injection
+  - Sanitize cells starting with =, +, -, @ (prefix with '); generate safe CSV for partners/exports.
+
+- Command injection
+  - Avoid shell interpolation; use process execution APIs with argument arrays; never pass untrusted strings to sh -c.
+
+- Path traversal & zip-slip
+  - Sanitize filenames; reject .. segments; ensure extracted paths remain within target directory; use safe archive libraries.
+
+- Template/deserialization
+  - Never evaluate untrusted templates/expressions; use safe template engines; avoid unsafe deserialization; use safe loaders.
+
+- Dependency & code scanning
+  - SCA in CI (e.g., Dependabot), SAST (CodeQL/Semgrep), pinned versions and rebuilds on updates.
+
+- Security headers (when hosting UI)
+  - X-Content-Type-Options: nosniff; X-Frame-Options: DENY; Referrer-Policy: no-referrer; Permissions-Policy as appropriate.
 
 Runtime hardening
 - Run containers as non-root; use read-only root filesystems; drop Linux capabilities not needed.
