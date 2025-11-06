@@ -117,13 +117,13 @@ done
 - Alternative: Use online Mermaid editors (mermaid.live) to export PNGs if CLI fails
 
 **Finding content in the guide**
-- Use line numbers: TL;DR (18-35), ETL/ELT (72-149), Streaming (152-205), Security (1451-1701), Stack examples (865-1042)
+- Use line numbers: TL;DR (18-35), ETL/ELT (72-149), Streaming (152-205), Stack examples (894-1071), Security (1480-1768)
 - Search for inline term definitions by looking for `**TermName** (explanation)` pattern
 - The guide is educational documentation, not an executable codebase - examples illustrate concepts
 
 ## Notes for Contributors
 
-From the guide itself (lines 2113-2117):
+From the guide itself (lines 2180-2184):
 - Keep definitions inline as terms first appear
 - Keep examples short and runnable where possible
 - Maintain an FP-first style: pure core logic, effectful edges, composition
@@ -135,12 +135,12 @@ From the guide itself (lines 2113-2117):
 - **Lines 38-69**: Core principles (contracts, schemas, idempotency, observability, composability)
 - **Lines 72-149**: ETL vs ELT, Medallion architecture (Bronze/Silver/Gold), SQL's role
 - **Lines 152-205**: Batch vs streaming, event design, watermarking, delivery guarantees
-- **Lines 688-766**: Utilities & energy industry patterns (OT/IT, AMI, SCADA)
-- **Lines 767-858**: Microsoft estate integrations (Azure, Entra ID, Event Hubs, ADF)
-- **Lines 865-1042**: Stack recipes with TypeScript, Python, and Scala examples
-- **Lines 1451-1701**: Security (encryption, secrets management, webhook verification examples)
-- **Lines 1984-2040**: Deployment environments (iPaaS, serverless, Kubernetes, warehouse-native, on-prem/Hyper-V)
-- **Lines 2041-2095**: Environments/CI-CD, SLIs/SLOs
+- **Lines 717-795**: Utilities & energy industry patterns (OT/IT, AMI, SCADA)
+- **Lines 796-887**: Microsoft estate integrations (Azure, Entra ID, Event Hubs, ADF)
+- **Lines 894-1071**: Stack recipes with TypeScript, Python, and Scala examples
+- **Lines 1480-1768**: Security (encryption, secrets management, webhook verification examples)
+- **Lines 2051-2107**: Deployment environments (iPaaS, serverless, Kubernetes, warehouse-native, on-prem/Hyper-V)
+- **Lines 2108-2124**: Environments/CI-CD, SLIs/SLOs
 
 **Quick reference**:
 - All technical terms are defined inline on first use with format: `**Term** (explanation)`
