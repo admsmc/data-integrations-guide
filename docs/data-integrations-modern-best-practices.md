@@ -1077,6 +1077,89 @@ Version schemas and use **backward compatibility** (new data still works with ol
 
 ---
 
+## Configuration and metadata (YAML/JSON/TOML)
+
+Role of YAML (and friends)
+- Human-editable configuration: dbt project/schema/tests (YAML), sources and models metadata, Great Expectations/Soda checks, OpenAPI specs (often YAML), CI pipelines (GitHub Actions/GitLab CI), orchestrators (Argo Workflows), and infra (Kubernetes/Helm).
+- Catalog/lineage ingestion: many metadata tools accept YAML configs for extractors and mappings.
+- Environment overlays: Helm values.yaml, Kustomize patches to vary endpoints/limits per env.
+
+When to prefer YAML vs JSON
+- YAML: human-maintained configs you review in PRs; supports comments and multi-line text.
+- JSON: machine-produced/consumed artifacts (logs, events, API payloads) and contracts that need strict typing and ubiquitous tooling.
+- TOML: simple app settings where minimal syntax and deterministic parsing are preferred.
+
+Best practices
+- Always include a top-level `version` and `kind` to enable breaking changes and routing.
+- Validate YAML configs in CI against a JSON Schema or typed model; fail fast on unknown keys.
+- Keep secrets out of YAML (use secret managers and env injection); reference by name, not inline.
+- Avoid YAML anchors/aliases; prefer explicit duplication for clarity and compatibility with simpler parsers.
+- Beware YAML 1.1 implicit types (`on`, `off`, `yes`, `no`); quote strings and prefer YAML 1.2.
+- Keep files small and composable; one concern per file (sources, schedules, checks, policies).
+- Format and lint: `yamllint`/`prettier` in CI; enforce key ordering where it improves diffs.
+
+Example: pipeline step config (YAML)
+```yaml
+version: 1
+kind: pipeline.step
+name: customers_incremental_load
+source:
+  driver: odbc
+  dsn: reporting_replica
+  query: |
+    SELECT id, email, updated_at
+    FROM customers
+    WHERE updated_at >= :last_watermark
+watermark:
+  column: updated_at
+  default: '1970-01-01T00:00:00Z'
+destination:
+  table: bronze.customers_raw
+  format: parquet
+  partition_by: [ingest_date]
+validation:
+  expect_not_null: [id]
+  expect_email_format: [email]
+```
+
+Validate YAML with Python (Pydantic)
+```python
+from pydantic import BaseModel, Field
+from typing import List, Optional
+import yaml
+
+class Source(BaseModel):
+    driver: str
+    dsn: str
+    query: str
+
+class Destination(BaseModel):
+    table: str
+    format: str
+    partition_by: List[str] = []
+
+class Validation(BaseModel):
+    expect_not_null: List[str] = []
+    expect_email_format: List[str] = []
+
+class Step(BaseModel):
+    version: int
+    kind: str
+    name: str
+    source: Source
+    destination: Destination
+    validation: Optional[Validation]
+
+cfg = yaml.safe_load(open('step.yaml'))
+step = Step.model_validate(cfg)  # raises on bad config
+```
+
+Notes
+- Generate machine-readable JSON from YAML at build time for runtime simplicity.
+- Treat configuration as code: PRs, owners, reviews, and rollback plans.
+
+---
+
 ## Testing strategies
 
 ![Testing Pyramid for Data Pipelines](images/testing.png)
