@@ -180,13 +180,6 @@ Continuous event processing.
 - Checkpointing & state: periodic checkpoints with exactly-once state backends (e.g., Flink) + externalized state (RocksDB). Ensure checkpoint + sink commits are atomic or compensatable.
 - Partitioning: choose keys to avoid hotspots; rebalance when key skew emerges; use compacted topics for latest-state streams.
 - Backpressure: monitor lag and processing time; apply rate-limits at sources or scale out consumers; use bounded buffers.
-- Time semantics: processing time (when you see it) vs event time (when it happened). Use event time for business-correct windows.
-- Watermarking: a heuristic for “we’ve likely seen all events up to T”. Configure lateness (e.g., 5m) to balance correctness vs latency.
-- Windows: tumbling (fixed), sliding (overlap), session (gaps). Late data: either update aggregates (retractions) or route to a correction topic.
-- Delivery guarantees: at-least-once is common; achieve effectively-once with deterministic keys + idempotent sinks or transactional writes.
-- Checkpointing & state: periodic checkpoints with exactly-once state backends (e.g., Flink) + externalized state (RocksDB). Ensure checkpoint + sink commits are atomic or compensatable.
-- Partitioning: choose keys to avoid hotspots; rebalance when key skew emerges; use compacted topics for latest-state streams.
-- Backpressure: monitor lag and processing time; apply rate-limits at sources or scale out consumers; use bounded buffers.
 
 Minimal Spark Structured Streaming example (event-time window + watermark)
 ```scala
