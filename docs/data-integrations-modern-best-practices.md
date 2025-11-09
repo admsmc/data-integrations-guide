@@ -2086,6 +2086,990 @@ logError(new Error("Invalid schema"), { file_name: "bad.csv", row: 42 });
 
 ---
 
+## Developer tools for building integrations
+
+This section covers essential tools that integration developers use daily for building, testing, debugging, and monitoring data integrations.
+
+### IDEs and code editors
+
+Choosing the right IDE significantly impacts productivity when building integrations. The best choice depends on your primary language, team preferences, and integration complexity.
+
+#### VS Code (Visual Studio Code)
+**Best for**: Multi-language integrations, TypeScript/JavaScript/Python, remote development
+
+**Why it excels for integrations**:
+- **Lightweight but powerful**: Fast startup, low memory usage
+- **Exceptional extension ecosystem**: 40,000+ extensions for every language and tool
+- **Built-in Git integration**: Stage, commit, diff, and resolve conflicts without leaving the editor
+- **Remote development**: SSH, containers, WSL support via Remote extensions
+- **Multi-root workspaces**: Work on frontend + backend + infrastructure in one window
+- **Integrated terminal**: Run tests, start servers, debug webhooks without context switching
+- **REST Client extension**: Test APIs directly in editor (alternative to Postman)
+- **Live Share**: Pair programming and debugging with teammates in real-time
+
+**Essential extensions for integrations**:
+```bash
+# Install via CLI
+code --install-extension ms-python.python
+code --install-extension esbenp.prettier-vscode
+code --install-extension dbaeumer.vscode-eslint
+code --install-extension humao.rest-client
+code --install-extension redhat.vscode-yaml
+code --install-extension tamasfe.even-better-toml
+code --install-extension ms-azuretools.vscode-docker
+code --install-extension ms-kubernetes-tools.vscode-kubernetes-tools
+code --install-extension github.copilot
+code --install-extension mhutchie.git-graph
+code --install-extension rangav.vscode-thunder-client
+code --install-extension redhat.vscode-xml
+```
+
+**Integration-specific workflows**:
+
+**1. Testing Stripe webhooks locally**:
+```json
+// .vscode/tasks.json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Dev Server",
+      "type": "npm",
+      "script": "dev",
+      "problemMatcher": [],
+      "isBackground": true
+    },
+    {
+      "label": "Stripe Webhook Forwarding",
+      "type": "shell",
+      "command": "stripe listen --forward-to localhost:3000/webhooks/stripe",
+      "isBackground": true
+    },
+    {
+      "label": "Start Dev + Webhooks",
+      "dependsOn": ["Start Dev Server", "Stripe Webhook Forwarding"],
+      "problemMatcher": []
+    }
+  ]
+}
+```
+
+**2. API testing with REST Client**:
+```http
+### Create PaymentIntent
+POST https://api.stripe.com/v1/payment_intents
+Authorization: Bearer {{$dotenv STRIPE_SECRET_KEY}}
+Content-Type: application/x-www-form-urlencoded
+
+amount=5000&currency=usd&metadata[order_id]=ord_123
+
+### Get balance transactions
+GET https://api.stripe.com/v1/balance_transactions
+  ?created[gte]={{$timestamp}}
+  &limit=100
+Authorization: Bearer {{$dotenv STRIPE_SECRET_KEY}}
+```
+
+**3. Debugging with launch configurations**:
+```json
+// .vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Webhook Handler",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "env": {
+        "STRIPE_SECRET_KEY": "${env:STRIPE_SECRET_KEY}",
+        "DATABASE_URL": "postgresql://localhost:5432/dev"
+      },
+      "skipFiles": ["<node_internals>/**"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug Python Integration",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/reconciliation.py",
+      "env": {
+        "STRIPE_SECRET_KEY": "${env:STRIPE_SECRET_KEY}"
+      },
+      "justMyCode": false
+    }
+  ]
+}
+```
+
+**Pros**:
+- Free and open source
+- Works identically on Mac, Windows, Linux
+- Excellent for polyglot integrations (TypeScript + Python + SQL + YAML)
+- Remote SSH debugging for cloud servers
+- Copilot for code generation
+
+**Cons**:
+- Requires extension configuration for advanced features
+- Can become sluggish with 50+ extensions
+- Less sophisticated refactoring than JetBrains IDEs
+
+**Best use case**: Full-stack TypeScript/Python integrations with REST APIs, webhooks, and cloud deployment
+
+---
+
+#### JetBrains IDEs (PyCharm, IntelliJ IDEA, WebStorm)
+**Best for**: Large codebases, enterprise Java/Scala, advanced refactoring, database work
+
+**Why they excel for integrations**:
+- **Intelligent code completion**: Context-aware suggestions beyond autocomplete
+- **Powerful refactoring**: Rename, extract method, change signature across entire project
+- **Built-in database tools**: Query console, schema browser, data editor (same as DataGrip)
+- **HTTP Client**: Built-in REST client with environment variables and test scripts
+- **Run configurations**: Complex multi-service debugging with shared state
+- **Version control integration**: Best-in-class Git tooling, merge conflict resolution
+- **Productivity shortcuts**: Navigate to anything, find usages, call hierarchy
+
+**PyCharm Professional features for integrations**:
+- **Database integration**: Browse schemas, edit data, generate SQL
+- **Remote interpreters**: Run Python on remote servers/Docker containers
+- **Jupyter notebooks**: Data exploration and analysis
+- **FastAPI/Flask support**: Endpoint navigation, HTTP client generation
+- **SQL injection prevention**: Detects unsafe string concatenation
+
+**IntelliJ IDEA Ultimate for JVM integrations**:
+- **Spring Boot**: Dependency injection awareness, endpoint mapping
+- **Kafka**: Built-in Kafka console for topic inspection
+- **Kubernetes**: Deploy, logs, exec into pods
+- **Profiler**: CPU/memory profiling for performance issues
+
+**Integration-specific workflows**:
+
+**1. HTTP Client for API testing**:
+```http
+### Create order (PyCharm/IntelliJ HTTP Client)
+POST {{base_url}}/api/orders
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "amount": 5000,
+  "currency": "usd",
+  "customer_id": "{{customer_id}}"
+}
+
+> {%
+  client.test("Order created", function() {
+    client.assert(response.status === 201, "Status is 201");
+    client.global.set("order_id", response.body.id);
+  });
+%}
+
+### Get order
+GET {{base_url}}/api/orders/{{order_id}}
+Authorization: Bearer {{auth_token}}
+```
+
+**2. Database debugging**:
+- Set breakpoint in Python code
+- View SQL queries in database console
+- Inspect query plans with EXPLAIN
+- Browse result sets with data editor
+- All in one window
+
+**3. Advanced debugging**:
+```python
+# PyCharm can evaluate complex expressions in debugger
+# Breakpoint here ↓
+validated_orders = [Order.model_validate(r) for r in records]
+
+# In debugger, evaluate:
+# [o.amount for o in validated_orders if o.status == 'paid']
+# len([o for o in validated_orders if o.amount > 10000])
+```
+
+**Pros**:
+- Superior code intelligence and refactoring
+- Built-in database tools eliminate separate DB client
+- Excellent for large monorepo integrations
+- Professional support and regular updates
+
+**Cons**:
+- Paid (Ultimate/Professional editions required for best features)
+- Higher memory usage (2-4 GB typical)
+- Slower startup than VS Code
+- Separate IDE per language family (PyCharm vs IntelliJ)
+
+**Best use case**: Python data pipelines with complex database operations, or JVM-based streaming integrations (Kafka/Flink/Spark)
+
+---
+
+#### Cursor
+**Best for**: AI-assisted integration development, rapid prototyping
+
+**Why it excels for integrations**:
+- **AI pair programming**: Built-in GPT-4 with full codebase context
+- **Chat with codebase**: Ask "How does webhook verification work?" and get answers from your code
+- **Multi-file edits**: AI suggests changes across multiple files simultaneously
+- **Based on VS Code**: Same extensions and shortcuts
+- **Inline AI completion**: More context-aware than Copilot
+
+**Integration-specific use cases**:
+```
+Prompt: "Add idempotency handling to the webhook handler using 
+the webhook_events table"
+
+→ Cursor generates:
+  1. Database query to check event ID
+  2. ON CONFLICT DO NOTHING handling
+  3. Transaction wrapper
+  4. Proper error handling
+```
+
+**Pros**:
+- Accelerates writing boilerplate (validation, error handling)
+- Great for learning new APIs (Stripe, Twilio, etc.)
+- AI understands your codebase patterns
+
+**Cons**:
+- Subscription required for unlimited AI usage
+- Still in active development
+- Privacy considerations for proprietary code
+
+**Best use case**: Rapid development of new integrations with unfamiliar APIs, or maintaining legacy integration code you didn't write
+
+---
+
+#### Vim / Neovim
+**Best for**: Terminal-native workflows, remote server work, extreme efficiency
+
+**Why some integration developers prefer it**:
+- **Lightning fast**: Opens instantly, minimal resource usage
+- **Keyboard-driven**: Never leave home row
+- **Remote-friendly**: Works over SSH with low latency
+- **Powerful text manipulation**: Macros, motions, operators
+- **LSP support**: Language servers for TypeScript, Python, Go
+
+**Modern Neovim setup for integrations**:
+```lua
+-- init.lua (simplified)
+require('packer').startup(function(use)
+  use 'neovim/nvim-lspconfig'        -- LSP
+  use 'hrsh7th/nvim-cmp'             -- Autocomplete
+  use 'nvim-telescope/telescope.nvim' -- Fuzzy finder
+  use 'nvim-treesitter/nvim-treesitter' -- Syntax
+  use 'tpope/vim-fugitive'           -- Git
+  use 'rest-nvim/rest.nvim'          -- HTTP client
+end)
+
+-- LSP for TypeScript and Python
+require('lspconfig').tsserver.setup{}
+require('lspconfig').pyright.setup{}
+```
+
+**Pros**:
+- Works everywhere (servers, containers, minimal VMs)
+- Unmatched editing speed once learned
+- Infinitely customizable
+
+**Cons**:
+- Steep learning curve (months to proficiency)
+- Plugin configuration required
+- Limited GUI features (no visual debugging)
+
+**Best use case**: Debugging production issues via SSH, editing configuration files, quick patches to running services
+
+---
+
+### IDE comparison matrix
+
+| Feature | VS Code | PyCharm/IntelliJ | Cursor | Vim/Neovim |
+|---------|---------|------------------|--------|------------|
+| **Startup time** | Fast (1-2s) | Slow (5-10s) | Fast (1-2s) | Instant (<1s) |
+| **Memory usage** | Low (200-500 MB) | High (2-4 GB) | Low (300-600 MB) | Minimal (50 MB) |
+| **Multi-language** | Excellent | Good (separate IDEs) | Excellent | Good (with plugins) |
+| **Database tools** | Extension required | Built-in (excellent) | Extension required | Limited |
+| **Remote development** | Excellent (SSH, containers) | Good (SSH, Docker) | Excellent | Native (SSH) |
+| **Refactoring** | Basic | Advanced | Basic | Basic |
+| **AI assistance** | Copilot (paid) | AI Assistant (paid) | Built-in (best) | Limited |
+| **Git integration** | Excellent | Excellent | Excellent | Good (plugins) |
+| **REST client** | Extension | Built-in | Extension | Plugin |
+| **Debugging** | Good | Excellent | Good | Basic |
+| **Cost** | Free | Paid (Ultimate) | Paid (subscription) | Free |
+| **Learning curve** | Easy | Moderate | Easy | Steep |
+| **Best for** | Full-stack JS/TS/Python | JVM/Python + DB heavy | AI-assisted rapid dev | Remote/terminal work |
+
+### Recommended IDE by integration type
+
+**REST API integrations (TypeScript/Node.js)**
+→ **VS Code** or **Cursor**
+- Excellent TypeScript support
+- REST Client extension for API testing
+- Fast iteration cycle
+
+**Data pipeline integrations (Python + SQL)**
+→ **PyCharm Professional**
+- Best-in-class Python and SQL support
+- Database tools eliminate separate client
+- Great for Pandas/Spark debugging
+
+**Enterprise Java/Scala streaming (Kafka/Flink)**
+→ **IntelliJ IDEA Ultimate**
+- Superior JVM tooling
+- Built-in Kafka console
+- Advanced debugging for concurrent code
+
+**Webhook/event-driven (mixed languages)**
+→ **VS Code**
+- Multi-language support
+- Easy ngrok + dev server setup
+- Great terminal integration
+
+**Production debugging/quick fixes**
+→ **Vim/Neovim**
+- SSH directly to server
+- Edit and restart services quickly
+- No GUI overhead
+
+**Legacy code modernization**
+→ **Cursor**
+- AI explains unfamiliar code
+- Suggests refactoring patterns
+- Accelerates understanding
+
+### Pro tips for integration development
+
+**1. Use workspace/project files**
+- Save configurations for each integration project
+- Share with team via Git
+- One-click setup for new developers
+
+**2. Configure auto-save carefully**
+- Enable for config files (YAML, JSON)
+- Disable for code (prevents broken saves mid-edit)
+- Use format-on-save for consistency
+
+**3. Master keyboard shortcuts**
+```
+VS Code essentials:
+- Cmd+P: Quick file open
+- Cmd+Shift+F: Search across files
+- Cmd+`: Toggle terminal
+- F5: Start debugging
+- Cmd+Shift+P: Command palette
+
+PyCharm/IntelliJ essentials:
+- Shift+Shift: Search everywhere
+- Cmd+Alt+L: Format code
+- Cmd+B: Go to definition
+- Ctrl+R: Run
+- Ctrl+D: Debug
+```
+
+**4. Use multi-cursor editing**
+- VS Code: Alt+Click (add cursor)
+- Select all occurrences: Cmd+Shift+L
+- Perfect for editing multiple env vars or config values
+
+**5. Configure file watchers**
+- Auto-format on save
+- Run linters on change
+- Regenerate types from schemas
+
+**6. Set up snippets for common patterns**
+```json
+// VS Code: TypeScript webhook handler snippet
+{
+  "Webhook Handler": {
+    "prefix": "webhook-handler",
+    "body": [
+      "export async function handle${1:Provider}Webhook(",
+      "  req: Request,",
+      "  res: Response",
+      ") {",
+      "  const signature = req.headers['${2:signature-header}'] as string;",
+      "  ",
+      "  // Verify signature",
+      "  const isValid = verify${1}Signature(req.body, signature);",
+      "  if (!isValid) {",
+      "    return res.status(401).send('Unauthorized');",
+      "  }",
+      "  ",
+      "  // Process event with idempotency",
+      "  const event = req.body;",
+      "  await processEvent(event);",
+      "  ",
+      "  res.status(200).json({ received: true });",
+      "}"
+    ]
+  }
+}
+```
+
+---
+
+### API development and testing
+
+#### Postman / Insomnia
+**Use for**: REST API exploration, testing, and documentation
+
+**Key features**:
+- Interactive API testing with collections and environments
+- Request history and variable management
+- Pre-request scripts and test assertions (JavaScript)
+- OAuth 2.0, API key, and Bearer token management
+- Mock servers for testing without real APIs
+- Team collaboration and shared workspaces
+- Code generation (curl, Python, Node.js, etc.)
+
+**Best practices**:
+- Organize requests into collections by service/endpoint
+- Use environment variables for URLs, tokens, API keys
+- Write test scripts to validate responses
+- Export collections for team sharing and CI/CD
+- Use Postman Monitors for uptime checks
+
+**Alternatives**: [Bruno](https://www.usebruno.com/) (Git-friendly, offline-first), [HTTPie](https://httpie.io/) (CLI), [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) (VS Code extension)
+
+#### curl / HTTPie
+**Use for**: Quick API testing from command line
+
+**curl examples**:
+```bash
+# GET with headers
+curl -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     https://api.example.com/v1/users
+
+# POST with JSON body
+curl -X POST https://api.example.com/v1/orders \
+     -H "Content-Type: application/json" \
+     -d '{"amount": 5000, "currency": "usd"}'
+
+# Debug with verbose output
+curl -v https://api.example.com/health
+
+# Follow redirects and save response
+curl -L -o response.json https://api.example.com/data
+```
+
+**HTTPie examples** (friendlier syntax):
+```bash
+# GET with auth
+http GET api.example.com/users Authorization:"Bearer $TOKEN"
+
+# POST with JSON (automatic)
+http POST api.example.com/orders amount:=5000 currency=usd
+
+# Download file
+http --download api.example.com/report.csv
+```
+
+### Webhook testing and debugging
+
+#### ngrok / localtunnel
+**Use for**: Exposing local servers to the internet for webhook testing
+
+**ngrok example**:
+```bash
+# Expose local port 3000
+ngrok http 3000
+# Returns: https://abc123.ngrok.io -> http://localhost:3000
+
+# With custom subdomain (paid)
+ngrok http 3000 --subdomain=myapp-webhooks
+
+# Inspect traffic at http://127.0.0.1:4040
+```
+
+**Use cases**:
+- Test Stripe, GitHub, Slack webhooks locally
+- Demo your integration to partners
+- Debug webhook payloads in real-time
+- Inspect request/response history
+
+**Alternatives**: [localtunnel](https://localtunnel.github.io/www/), [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/), [serveo](https://serveo.net/)
+
+#### webhook.site / RequestBin
+**Use for**: Inspecting and debugging webhook payloads
+
+**Features**:
+- Unique URL to receive webhooks
+- View full request (headers, body, query params)
+- No code required
+- Share URLs with team
+- Custom response configuration
+
+**Workflow**:
+1. Get unique URL from webhook.site
+2. Configure as webhook endpoint in partner system
+3. Trigger event and inspect payload
+4. Copy payload for local testing
+
+#### Stripe CLI / Twilio CLI
+**Use for**: Testing webhooks from specific providers locally
+
+**Stripe CLI example**:
+```bash
+# Forward Stripe webhooks to local server
+stripe listen --forward-to localhost:3000/webhooks/stripe
+
+# Trigger test events
+stripe trigger payment_intent.succeeded
+stripe trigger charge.refunded
+
+# View webhook logs
+stripe logs tail
+```
+
+### Data transformation and validation
+
+#### jq
+**Use for**: JSON parsing and transformation in CLI
+
+**Examples**:
+```bash
+# Pretty print JSON
+echo '{"name":"Alice","age":30}' | jq .
+
+# Extract specific fields
+curl api.example.com/users | jq '.data[].email'
+
+# Filter and transform
+cat orders.json | jq '[.[] | select(.status == "paid") | {id, amount}]'
+
+# Aggregate
+cat sales.json | jq '[.[] | .amount] | add'
+
+# Convert CSV to JSON
+csv2json < data.csv | jq .
+```
+
+**Common integration tasks**:
+- Extract IDs from paginated API responses
+- Transform API response to expected schema
+- Debug webhook payloads
+- Parse log files for specific events
+
+#### yq
+**Use for**: YAML parsing (like jq for YAML)
+
+```bash
+# Extract value from config
+yq '.database.host' config.yaml
+
+# Convert YAML to JSON
+yq -o json config.yaml
+
+# Update values
+yq '.api.timeout = 30' -i config.yaml
+```
+
+### Database tools
+
+#### DataGrip / DBeaver
+**Use for**: Universal database IDE
+
+**Features**:
+- Connect to PostgreSQL, MySQL, SQL Server, Oracle, Snowflake, BigQuery, etc.
+- Query editor with autocomplete and syntax highlighting
+- Visual explain plans
+- Data export (CSV, JSON, Parquet)
+- Schema comparison and migration
+- SSH tunneling and SSL support
+
+**Integration use cases**:
+- Debug data quality issues
+- Test SQL for CDC pipelines
+- Validate transformations
+- Export sample data for testing
+
+**Alternatives**: [TablePlus](https://tableplus.com/), [pgAdmin](https://www.pgadmin.org/), [Azure Data Studio](https://azure.microsoft.com/en-us/products/data-studio), [Beekeeper Studio](https://www.beekeeperstudio.io/)
+
+#### psql / mysql / sqlcmd
+**Use for**: CLI database access
+
+**psql examples**:
+```bash
+# Connect with connection string
+psql postgresql://user:pass@host:5432/dbname
+
+# Execute query
+psql -c "SELECT COUNT(*) FROM orders WHERE status = 'paid';"
+
+# Output as CSV
+psql -c "COPY (SELECT * FROM orders) TO STDOUT CSV HEADER" > orders.csv
+
+# Describe table
+psql -c "\d+ orders"
+```
+
+### File and data transfer
+
+#### FileZilla / Cyberduck
+**Use for**: SFTP/FTP file transfers (GUI)
+
+**Integration use cases**:
+- Browse partner SFTP servers
+- Test file upload/download
+- Verify file permissions
+- Debug connection issues
+
+#### rclone
+**Use for**: Sync files between cloud storage (S3, Azure, GCS)
+
+```bash
+# Copy from S3 to local
+rclone copy s3:mybucket/data /local/path
+
+# Sync bidirectionally
+rclone sync /local/path s3:mybucket/data
+
+# Mount remote as filesystem
+rclone mount s3:mybucket /mnt/s3
+```
+
+### Schema and API documentation
+
+#### Stoplight / Swagger Editor
+**Use for**: OpenAPI spec creation and testing
+
+**Features**:
+- Visual OpenAPI 3.0 editor
+- Mock servers from spec
+- API documentation generation
+- Contract testing
+- Schema validation
+
+#### quicktype
+**Use for**: Generate types from JSON/JSON Schema
+
+```bash
+# Generate TypeScript types from JSON
+quicktype data.json -o types.ts
+
+# Generate Python Pydantic models
+quicktype --lang python --python-version 3.10 schema.json
+
+# From JSON Schema
+quicktype --src-lang schema schema.json -o models.go
+```
+
+### Observability and debugging
+
+#### Wireshark / Charles Proxy
+**Use for**: Network traffic inspection
+
+**Use cases**:
+- Debug SSL/TLS handshake issues
+- Inspect HTTP/HTTPS requests
+- Understand partner API behavior
+- Diagnose timeout issues
+
+#### OpenTelemetry Collector
+**Use for**: Collecting traces, metrics, and logs
+
+**Quick start**:
+```yaml
+# otel-collector-config.yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+exporters:
+  logging:
+    loglevel: debug
+  jaeger:
+    endpoint: jaeger:14250
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [logging, jaeger]
+```
+
+#### k9s / kubectl
+**Use for**: Kubernetes debugging
+
+```bash
+# View logs for integration pod
+kubectl logs -f deployment/stripe-webhook-handler
+
+# Port-forward to local
+kubectl port-forward svc/api 8080:80
+
+# Exec into pod
+kubectl exec -it pod/integration-worker -- /bin/bash
+
+# Interactive k9s
+k9s  # Navigate with keyboard
+```
+
+### Code quality and security
+
+#### SonarQube / SonarCloud
+**Use for**: Code quality and security scanning
+
+**Integration CI example**:
+```yaml
+# .github/workflows/quality.yml
+name: Code Quality
+on: [push]
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: sonarsource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+```
+
+#### Snyk / Dependabot
+**Use for**: Dependency vulnerability scanning
+
+**Features**:
+- Detect vulnerable dependencies
+- Auto-create PRs for upgrades
+- Container image scanning
+- License compliance checks
+
+### Workflow automation
+
+#### Make (modern replacement for cron)
+**Use for**: Task automation and workflows
+
+```makefile
+# Makefile
+.PHONY: test integration deploy
+
+test:
+	@pytest tests/
+
+integration:
+	@echo "Testing Stripe integration..."
+	@stripe trigger payment_intent.succeeded
+	@curl -f http://localhost:3000/health
+
+deploy:
+	@docker build -t integration:latest .
+	@kubectl apply -f k8s/
+
+local:
+	@docker-compose up -d
+	@ngrok http 3000
+```
+
+#### GitHub Actions / GitLab CI
+**Use for**: CI/CD pipelines
+
+**Integration testing example**:
+```yaml
+name: Integration Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
+        run: |
+          npm install
+          npm run test:integration
+      
+      - name: Test webhook handling
+        run: |
+          npm run dev &
+          sleep 5
+          curl -X POST http://localhost:3000/webhooks/stripe \
+            -H "Content-Type: application/json" \
+            -d @fixtures/payment_intent_succeeded.json
+```
+
+### Secrets management
+
+#### 1Password CLI / AWS Secrets Manager CLI
+**Use for**: Secure secret retrieval in dev and CI
+
+**1Password example**:
+```bash
+# Load secrets into env
+eval $(op signin)
+op run -- npm run dev  # Injects secrets as env vars
+
+# Get specific secret
+STRIPE_KEY=$(op read "op://Dev/Stripe/secret_key")
+```
+
+**AWS Secrets Manager**:
+```bash
+# Retrieve secret
+aws secretsmanager get-secret-value \
+  --secret-id prod/stripe/api-key \
+  --query SecretString --output text
+```
+
+### Data quality and testing
+
+#### Great Expectations
+**Use for**: Data validation and quality checks
+
+```python
+import great_expectations as gx
+
+context = gx.get_context()
+validator = context.sources.pandas_default.read_csv("orders.csv")
+
+# Add expectations
+validator.expect_column_values_to_not_be_null("order_id")
+validator.expect_column_values_to_be_between("amount", min_value=0)
+validator.expect_column_values_to_be_in_set("status", ["paid", "pending", "failed"])
+
+# Validate
+results = validator.validate()
+print(results["success"])  # True/False
+```
+
+#### Faker / Mockaroo
+**Use for**: Generate test data
+
+```python
+from faker import Faker
+import json
+
+fake = Faker()
+
+# Generate test orders
+orders = [{
+    "id": fake.uuid4(),
+    "customer_email": fake.email(),
+    "amount": fake.random_int(1000, 10000),
+    "created_at": fake.iso8601()
+} for _ in range(100)]
+
+with open('test_orders.json', 'w') as f:
+    json.dump(orders, f, indent=2)
+```
+
+### Performance and load testing
+
+#### Apache Bench / wrk / k6
+**Use for**: Load testing APIs and webhooks
+
+**Apache Bench**:
+```bash
+# 1000 requests, 10 concurrent
+ab -n 1000 -c 10 http://localhost:3000/api/orders
+```
+
+**k6 example**:
+```javascript
+import http from 'k6/http';
+import { check } from 'k6';
+
+export const options = {
+  vus: 50,  // 50 virtual users
+  duration: '30s',
+};
+
+export default function () {
+  const res = http.post('http://localhost:3000/webhooks/stripe', 
+    JSON.stringify({
+      type: 'payment_intent.succeeded',
+      data: { /* ... */ }
+    }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+  
+  check(res, {
+    'status is 200': (r) => r.status === 200,
+    'response time < 500ms': (r) => r.timings.duration < 500,
+  });
+}
+```
+
+### Container and orchestration
+
+#### Docker Desktop / Podman
+**Use for**: Local containerized development
+
+```bash
+# Run PostgreSQL locally
+docker run -d -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres \
+  postgres:15
+
+# Run Kafka for testing
+docker run -d -p 9092:9092 \
+  apache/kafka:latest
+
+# Docker Compose for full stack
+docker-compose up
+```
+
+**docker-compose.yml example**:
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/dev
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - db
+      - kafka
+  
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: postgres
+  
+  kafka:
+    image: apache/kafka:latest
+    ports:
+      - "9092:9092"
+```
+
+### Quick reference: tool selection by use case
+
+| Use Case | Tool | Alternative |
+|----------|------|-------------|
+| API testing | Postman | Bruno, Insomnia |
+| Webhook debugging | ngrok | localtunnel, webhook.site |
+| JSON parsing | jq | jless, fx |
+| Database GUI | DataGrip | DBeaver, TablePlus |
+| SFTP client | FileZilla | Cyberduck, WinSCP |
+| Secret management | 1Password CLI | AWS Secrets Manager |
+| Load testing | k6 | Apache Bench, wrk |
+| Code quality | SonarQube | CodeClimate |
+| Dependency scanning | Snyk | Dependabot |
+| Test data generation | Faker | Mockaroo |
+| Network debugging | Wireshark | Charles Proxy |
+| Container runtime | Docker | Podman |
+| K8s debugging | k9s | Lens, kubectl |
+| CI/CD | GitHub Actions | GitLab CI, CircleCI |
+| Observability | OpenTelemetry | Datadog, New Relic |
+
+---
+
 ## Security and governance
 
 Warehouse access control patterns

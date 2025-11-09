@@ -1,0 +1,14 @@
+{
+  "name": "data-integrations-guide",
+  "version": "1.0.0",
+  "description": "Modern data integrations guide with best practices",
+  "private": true,
+  "scripts": {
+    "serve": "python3 -m http.server 8000",
+    "generate-pdf": "node generate-pdf.js",
+    "pdf": "npm run generate-pdf"
+  },
+  "devDependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}
